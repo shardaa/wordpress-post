@@ -14,7 +14,11 @@
         min-height: 100vh;
         display: grid;
         place-items: center;
-        background: #0b1020;
+        background:
+          radial-gradient(circle at 20% 20%, rgba(79, 70, 229, 0.28), transparent 28%),
+          radial-gradient(circle at 80% 0%, rgba(56, 189, 248, 0.24), transparent 30%),
+          radial-gradient(circle at 80% 80%, rgba(99, 102, 241, 0.16), transparent 32%),
+          #0b1020;
         color: #f5f7fb;
       }
       main {
@@ -30,6 +34,52 @@
         margin: 0 0 24px;
         color: #b8c2d6;
         font-size: 16px;
+      }
+      .stack {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        align-items: center;
+      }
+      .topic-box,
+      .message-box {
+        width: 100%;
+        text-align: left;
+        background: rgba(20, 27, 52, 0.92);
+        border: 1px solid #26304f;
+        border-radius: 8px;
+        padding: 18px;
+        box-sizing: border-box;
+        backdrop-filter: blur(10px);
+      }
+      .topic-head,
+      .message-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+      }
+      .topic-title,
+      .message-title {
+        font-size: 14px;
+        color: #9fb0d9;
+        margin-bottom: 8px;
+      }
+      .topic-value {
+        font-size: 18px;
+        line-height: 1.5;
+        color: #f5f7fb;
+      }
+      .subtle-button,
+      .copy-button {
+        appearance: none;
+        border: 1px solid #334061;
+        border-radius: 8px;
+        background: transparent;
+        color: #d9e0f2;
+        padding: 10px 14px;
+        font-size: 14px;
+        cursor: pointer;
       }
       button {
         appearance: none;
@@ -47,12 +97,13 @@
         cursor: not-allowed;
       }
       .panel {
-        margin-top: 28px;
+        margin-top: 18px;
         text-align: left;
-        background: #141b34;
+        background: rgba(20, 27, 52, 0.94);
         border: 1px solid #26304f;
         border-radius: 8px;
         padding: 18px;
+        backdrop-filter: blur(10px);
       }
       .row {
         margin-bottom: 10px;
@@ -70,15 +121,52 @@
         overflow: auto;
       }
       a { color: #a5b4fc; }
+      .message-box.success {
+        border-color: #1f8f5f;
+      }
+      .message-box.error {
+        border-color: #b53b4e;
+      }
+      .message-meta {
+        margin-top: 8px;
+        color: #b8c2d6;
+        font-size: 14px;
+      }
+      .message-actions {
+        margin-top: 14px;
+      }
     </style>
   </head>
   <body>
     <main>
       <h1>WordPress Auto Publisher</h1>
       <p>One click to research the next topic, write the article, and publish it to WordPress.</p>
-      <button id="generateBtn">Generate</button>
+      <div class="stack">
+        <section class="topic-box" id="topicBox">
+          <div class="topic-head">
+            <div>
+              <div class="topic-title">Selected Topic</div>
+              <div class="topic-value" id="selectedTopic">Loading topics...</div>
+            </div>
+            <button class="subtle-button" id="rotateTopicBtn" type="button">Rotate topic</button>
+          </div>
+        </section>
 
-      <section class="panel" id="statusPanel">
+        <button id="generateBtn">Generate</button>
+
+        <section class="message-box" id="messageBox" hidden>
+          <div class="message-head">
+            <div>
+              <div class="message-title" id="messageLabel">Status</div>
+              <div class="topic-value" id="messageTitle">-</div>
+            </div>
+          </div>
+          <div class="message-meta" id="messageMeta"></div>
+          <div class="message-actions" id="messageActions"></div>
+        </section>
+      </div>
+
+      <section class="panel" id="statusPanel" hidden>
         <div class="row"><strong>Status:</strong> <span id="statusText">Idle</span></div>
         <div class="row"><strong>Current Topic:</strong> <span id="topicText">-</span></div>
         <div class="row"><strong>Latest Post:</strong> <span id="postText">-</span></div>

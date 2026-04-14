@@ -1,23 +1,46 @@
 const generateBtn = document.getElementById("generateBtn");
+const rotateTopicBtn = document.getElementById("rotateTopicBtn");
+const selectedTopic = document.getElementById("selectedTopic");
 const statusText = document.getElementById("statusText");
 const topicText = document.getElementById("topicText");
 const postText = document.getElementById("postText");
+const statusPanel = document.getElementById("statusPanel");
 const terminalPanel = document.getElementById("terminalPanel");
 const logs = document.getElementById("logs");
+const messageBox = document.getElementById("messageBox");
+const messageLabel = document.getElementById("messageLabel");
+const messageTitle = document.getElementById("messageTitle");
+const messageMeta = document.getElementById("messageMeta");
+const messageActions = document.getElementById("messageActions");
 let previousRunning = false;
-let lastFailureSignature = "";
-let lastSuccessSignature = "";
+let availableTopics = [];
+let currentTopicIndex = 0;
 
 generateBtn.addEventListener("click", async () => {
   generateBtn.disabled = true;
-  const response = await fetch("/generate", { method: "POST" });
+  clearMessage();
+  const response = await fetch("/generate", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      topic: availableTopics[currentTopicIndex] || ""
+    })
+  });
   const json = await response.json();
   if (!response.ok) {
-    alert(json.message || "Could not start generation.");
+    showErrorBox(json.message || "Could not start generation.");
     generateBtn.disabled = false;
     return;
   }
   await refreshStatus();
+});
+
+rotateTopicBtn.addEventListener("click", async () => {
+  if (!availableTopics.length) return;
+  currentTopicIndex = Math.floor(Math.random() * availableTopics.length);
+  renderSelectedTopic();
 });
 
 async function refreshStatus() {
@@ -44,45 +67,82 @@ async function refreshStatus() {
 
   logs.textContent = (status.logs || []).join("\n");
   terminalPanel.hidden = !status.running;
+  statusPanel.hidden = !status.running;
   generateBtn.disabled = status.running;
+  rotateTopicBtn.disabled = status.running;
 
   if (previousRunning && !status.running) {
     if (status.success) {
-      const successSignature = `${status.finishedAt || ""}|${status.lastOutput?.latestWordPressLink || status.lastOutput?.latestHtmlFile || ""}`;
-      if (successSignature && successSignature !== lastSuccessSignature) {
-        lastSuccessSignature = successSignature;
-        alert(status.lastOutput?.latestWordPressLink
-          ? `Post published successfully:\n${status.lastOutput.latestWordPressLink}`
-          : "Post generation completed successfully.");
-      }
+      showSuccessBox(status);
     } else if (status.success === false) {
       const errorText = (status.logs || []).slice(-20).join("\n");
-      const failureSignature = `${status.finishedAt || ""}|${errorText}`;
-      if (failureSignature && failureSignature !== lastFailureSignature) {
-        lastFailureSignature = failureSignature;
-        showErrorPopup(errorText || "Generation failed.");
-      }
+      showErrorBox(errorText || "Generation failed.");
     }
   }
 
   previousRunning = status.running;
 }
 
+async function loadTopics() {
+  const response = await fetch("/topics");
+  const json = await response.json();
+  availableTopics = json.topics || [];
+  currentTopicIndex = 0;
+  renderSelectedTopic();
+}
+
+function renderSelectedTopic() {
+  selectedTopic.textContent = availableTopics[currentTopicIndex] || "No topics available";
+}
+
 setInterval(refreshStatus, 2500);
+loadTopics();
 refreshStatus();
 
-function showErrorPopup(errorText) {
-  const shouldCopy = confirm(
-    `Generation failed.\n\nPress OK to copy the error.\nPress Cancel to dismiss.\n\n${truncate(errorText, 900)}`
-  );
+function clearMessage() {
+  messageBox.hidden = true;
+  messageBox.className = "message-box";
+  messageLabel.textContent = "Status";
+  messageTitle.textContent = "-";
+  messageMeta.textContent = "";
+  messageActions.innerHTML = "";
+}
 
-  if (shouldCopy) {
-    navigator.clipboard.writeText(errorText).then(() => {
-      alert("Error copied.");
-    }).catch(() => {
-      alert("Could not copy automatically. Error:\n\n" + errorText);
-    });
-  }
+function showSuccessBox(status) {
+  messageBox.hidden = false;
+  messageBox.className = "message-box success";
+  messageLabel.textContent = "Published";
+  messageTitle.textContent = status.currentTopic || status.lastOutput?.latestProcessedTopic || "Article published";
+  messageMeta.innerHTML = status.lastOutput?.latestWordPressLink
+    ? `Post published successfully. <a href="${status.lastOutput.latestWordPressLink}" target="_blank" rel="noopener noreferrer">Open post</a>`
+    : "Article generation completed successfully.";
+  messageActions.innerHTML = "";
+}
+
+function showErrorBox(errorText) {
+  messageBox.hidden = false;
+  messageBox.className = "message-box error";
+  messageLabel.textContent = "Error";
+  messageTitle.textContent = "Generation failed";
+  messageMeta.textContent = truncate(errorText, 900);
+  messageActions.innerHTML = "";
+
+  const copyButton = document.createElement("button");
+  copyButton.type = "button";
+  copyButton.className = "copy-button";
+  copyButton.textContent = "Copy error";
+  copyButton.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(errorText);
+      copyButton.textContent = "Copied";
+      setTimeout(() => {
+        copyButton.textContent = "Copy error";
+      }, 1600);
+    } catch {
+      copyButton.textContent = "Copy failed";
+    }
+  });
+  messageActions.appendChild(copyButton);
 }
 
 function truncate(value, maxLength) {

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dryRun = process.argv.includes("--dry-run");
 const researchMode = getArgValue("--research") || process.env.RESEARCH_MODE || "browser";
+const customTopic = getArgValue("--topic").trim();
 let wordpressAccessVerified = false;
 let cachedCategoryIds = null;
 
@@ -21,7 +22,9 @@ async function main() {
 
   const topics = await readTopics();
   const processed = await readProcessed();
-  const pending = topics.filter((topic) => !processed[topic]);
+  const pending = customTopic
+    ? [customTopic]
+    : topics.filter((topic) => !processed[topic]);
   const limit = Number(process.env.ARTICLE_LIMIT || 0);
   const selected = limit > 0 ? pending.slice(0, limit) : pending;
 
@@ -79,14 +82,16 @@ async function main() {
     );
     await writeFile(path.join(root, "output", `${safeSlug}.html`), html);
 
-    processed[topic] = {
-      createdAt: new Date().toISOString(),
-      slug: safeSlug,
-      wordpressId: wordpressPost?.id || null,
-      wordpressLink: wordpressPost?.link || null,
-      dryRun
-    };
-    await writeFile(path.join(root, "state", "processed.json"), JSON.stringify(processed, null, 2));
+    if (!customTopic) {
+      processed[topic] = {
+        createdAt: new Date().toISOString(),
+        slug: safeSlug,
+        wordpressId: wordpressPost?.id || null,
+        wordpressLink: wordpressPost?.link || null,
+        dryRun
+      };
+      await writeFile(path.join(root, "state", "processed.json"), JSON.stringify(processed, null, 2));
+    }
   }
 }
 

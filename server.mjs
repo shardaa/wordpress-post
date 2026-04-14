@@ -9,6 +9,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)));
 const publicDir = path.join(root, "public");
 const outputDir = path.join(root, "output");
 const stateFile = path.join(root, "state", "processed.json");
+const topicsFile = path.join(root, "topics.txt");
 const port = Number(process.env.PORT || 3000);
 
 const jobState = {
@@ -43,11 +44,16 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, await buildStatusPayload());
     }
 
+    if (req.method === "GET" && url.pathname === "/topics") {
+      return sendJson(res, 200, { topics: await readTopics() });
+    }
+
     if (req.method === "POST" && url.pathname === "/generate") {
       if (jobState.running) {
         return sendJson(res, 409, { ok: false, message: "A generation job is already running." });
       }
-      startGenerationJob();
+      const body = await readJsonBody(req);
+      startGenerationJob(body?.topic || "");
       return sendJson(res, 202, { ok: true, message: "Generation started." });
     }
 
@@ -61,18 +67,23 @@ server.listen(port, () => {
   console.log(`WordPress Auto Publisher UI running on http://0.0.0.0:${port}`);
 });
 
-function startGenerationJob() {
+function startGenerationJob(topic = "") {
   jobState.running = true;
   jobState.startedAt = new Date().toISOString();
   jobState.finishedAt = null;
   jobState.success = null;
   jobState.code = null;
-  jobState.currentTopic = null;
+  jobState.currentTopic = topic || null;
   jobState.logs = [];
+
+  const args = ["scripts/publish_articles.mjs", "--research=browser"];
+  if (topic) {
+    args.push(`--topic=${topic}`);
+  }
 
   const child = spawn(
     process.execPath,
-    ["scripts/publish_articles.mjs", "--research=browser"],
+    args,
     {
       cwd: root,
       env: {
@@ -134,10 +145,40 @@ async function getLatestOutputSummary() {
   }
 }
 
+async function readTopics() {
+  const text = await readFile(topicsFile, "utf8");
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"));
+}
+
 async function serveFile(res, filePath, contentType) {
   const content = await readFile(filePath);
   res.writeHead(200, { "Content-Type": contentType });
   res.end(content);
+}
+
+async function readJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > 1_000_000) {
+        reject(new Error("Request body too large"));
+        req.destroy();
+      }
+    });
+    req.on("end", () => {
+      if (!body) return resolve({});
+      try {
+        resolve(JSON.parse(body));
+      } catch (error) {
+        reject(error);
+      }
+    });
+    req.on("error", reject);
+  });
 }
 
 function sendJson(res, statusCode, payload) {
