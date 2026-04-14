@@ -249,7 +249,8 @@ async function searchWebWithBrowser(topic) {
     }
 
     if (!candidates.length) {
-      throw new Error("Browser research found no results. Try BROWSER_HEADLESS=false or change SEARCH_ENGINES.");
+      console.warn("Browser search engines returned no results. Trying curated source fallback.");
+      return researchFromCuratedSources(context, topic, targetCount);
     }
 
     const researched = [];
@@ -270,6 +271,35 @@ async function searchWebWithBrowser(topic) {
   } finally {
     await browser.close();
   }
+}
+
+async function researchFromCuratedSources(context, topic, targetCount) {
+  const sourceUrls = getCuratedSourceUrls(topic).slice(0, Number(process.env.CURATED_SOURCE_LIMIT || 10));
+  const researched = [];
+
+  for (const sourceUrl of sourceUrls) {
+    if (researched.length >= targetCount) break;
+    const page = await context.newPage();
+    console.log(`Reading curated source ${researched.length + 1}/${Math.min(targetCount, sourceUrls.length)}: ${sourceUrl}`);
+    try {
+      const summary = await extractCuratedSourceSummary(page, sourceUrl, topic);
+      if (isRelevantCuratedSummary(summary, topic)) {
+        researched.push(summary);
+      } else {
+        console.warn(`Curated source skipped: ${sourceUrl} (not relevant enough for topic)`);
+      }
+    } catch (error) {
+      console.warn(`Curated source skipped: ${sourceUrl} (${error.message})`);
+    } finally {
+      await page.close();
+    }
+  }
+
+  if (!researched.length) {
+    throw new Error("Browser research found no results, and curated fallback sources were not usable.");
+  }
+
+  return researched;
 }
 
 async function getPlaywright() {
@@ -409,6 +439,103 @@ async function extractPageSummary(page, candidate) {
       image: getMeta('meta[property="og:image"]') || getMeta('meta[name="twitter:image"]') || null
     };
   }, candidate);
+}
+
+async function extractCuratedSourceSummary(page, sourceUrl, topic) {
+  await page.goto(sourceUrl, { waitUntil: "domcontentloaded", timeout: Number(process.env.SOURCE_PAGE_TIMEOUT_MS || 20000) });
+  await page.waitForTimeout(Number(process.env.PAGE_WAIT_MS || 1500));
+
+  return page.evaluate((input) => {
+    const getMeta = (selector) => document.querySelector(selector)?.getAttribute("content") || "";
+    const paragraphs = Array.from(document.querySelectorAll("p, li"))
+      .map((node) => node.textContent?.replace(/\s+/g, " ").trim() || "")
+      .filter((text) => text.length > 60)
+      .slice(0, 12)
+      .map((text) => text.slice(0, 500));
+    const headings = Array.from(document.querySelectorAll("h1,h2,h3"))
+      .map((node) => node.textContent?.replace(/\s+/g, " ").trim() || "")
+      .filter(Boolean)
+      .slice(0, 16);
+
+    return {
+      title: document.title || input.topic,
+      link: location.href,
+      snippet: getMeta('meta[name="description"]') || headings[0] || input.topic,
+      source: location.hostname.replace(/^www\./, ""),
+      publishedHint:
+        getMeta('meta[property="article:published_time"]') ||
+        getMeta('meta[name="date"]') ||
+        getMeta('meta[name="pubdate"]') ||
+        null,
+      headings,
+      keyPoints: paragraphs,
+      image: getMeta('meta[property="og:image"]') || getMeta('meta[name="twitter:image"]') || null
+    };
+  }, { topic });
+}
+
+function getCuratedSourceUrls(topic) {
+  const lower = topic.toLowerCase();
+  const urls = new Set();
+
+  const add = (...items) => items.forEach((item) => urls.add(item));
+
+  add(
+    "https://news.google.com/",
+    "https://www.reuters.com/technology/",
+    "https://apnews.com/hub/technology",
+    "https://techcrunch.com/category/artificial-intelligence/",
+    "https://www.theverge.com/ai-artificial-intelligence",
+    "https://www.zdnet.com/topic/artificial-intelligence/"
+  );
+
+  if (/(ai|artificial intelligence|chatgpt|openai|gemini|claude|llm|automation|agent)/.test(lower)) {
+    add(
+      "https://openai.com/news/",
+      "https://blog.google/technology/ai/",
+      "https://deepmind.google/discover/blog/",
+      "https://www.anthropic.com/news",
+      "https://developers.googleblog.com/",
+      "https://blog.google/products/gemini/"
+    );
+  }
+
+  if (/(seo|search console|google search|ranking|wordpress seo)/.test(lower)) {
+    add(
+      "https://developers.google.com/search/blog",
+      "https://searchengineland.com/",
+      "https://www.searchenginejournal.com/",
+      "https://yoast.com/seo-blog/"
+    );
+  }
+
+  if (/(wordpress|plugin|woocommerce)/.test(lower)) {
+    add(
+      "https://wordpress.org/news/",
+      "https://developer.wordpress.org/news/",
+      "https://woocommerce.com/blog/"
+    );
+  }
+
+  return [...urls];
+}
+
+function isRelevantCuratedSummary(summary, topic) {
+  const haystack = [
+    summary.title,
+    summary.snippet,
+    ...(summary.headings || []),
+    ...(summary.keyPoints || [])
+  ].join(" ").toLowerCase();
+
+  const terms = topic
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word.length > 2);
+
+  if (!terms.length) return true;
+  const matchCount = terms.filter((term) => haystack.includes(term)).length;
+  return matchCount >= Math.min(2, terms.length);
 }
 
 async function searchImagesFromResearch(topic, research) {
