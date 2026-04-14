@@ -207,8 +207,16 @@ async function searchWebWithBrowser(topic) {
     .filter(Boolean);
   const targetCount = Number(process.env.SEARCH_RESULTS_PER_TOPIC || 8);
   const query = `${topic} latest news updates`;
+  const requestedHeadless = process.env.BROWSER_HEADLESS !== "false";
+  const forcedHeadless = process.platform === "linux" && !process.env.DISPLAY;
+  const headless = forcedHeadless ? true : requestedHeadless;
+
+  if (forcedHeadless && !requestedHeadless) {
+    console.log("No DISPLAY detected on Linux. Forcing headless browser mode.");
+  }
+
   const browser = await chromium.launch({
-    headless: process.env.BROWSER_HEADLESS !== "false"
+    headless
   });
   const context = await browser.newContext({
     userAgent:

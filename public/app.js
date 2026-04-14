@@ -15,10 +15,15 @@ const messageActions = document.getElementById("messageActions");
 let previousRunning = false;
 let availableTopics = [];
 let currentTopicIndex = 0;
+let lastHandledFinish = "";
 
 generateBtn.addEventListener("click", async () => {
   generateBtn.disabled = true;
   clearMessage();
+  terminalPanel.hidden = false;
+  statusPanel.hidden = false;
+  logs.textContent = `$ boot publisher\n$ preparing topic: ${availableTopics[currentTopicIndex] || "next topic"}\n`;
+  previousRunning = true;
   const response = await fetch("/generate", {
     method: "POST",
     headers: {
@@ -66,16 +71,19 @@ async function refreshStatus() {
   }
 
   logs.textContent = (status.logs || []).join("\n");
-  terminalPanel.hidden = !status.running;
+  terminalPanel.hidden = !(status.running || (status.success === false && (status.logs || []).length));
   statusPanel.hidden = !status.running;
   generateBtn.disabled = status.running;
   rotateTopicBtn.disabled = status.running;
 
-  if (previousRunning && !status.running) {
+  if (!status.running && status.finishedAt && status.finishedAt !== lastHandledFinish) {
+    lastHandledFinish = status.finishedAt;
     if (status.success) {
+      terminalPanel.hidden = true;
       showSuccessBox(status);
     } else if (status.success === false) {
-      const errorText = (status.logs || []).slice(-20).join("\n");
+      terminalPanel.hidden = false;
+      const errorText = (status.logs || []).slice(-30).join("\n");
       showErrorBox(errorText || "Generation failed.");
     }
   }
