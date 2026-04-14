@@ -1,0 +1,13 @@
+{
+  "name": "wordpress-auto-publisher",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "publish": "node scripts/publish_articles.mjs",
+    "dry-run": "node scripts/publish_articles.mjs --dry-run"
+  },
+  "dependencies": {
+    "playwright": "^1.56.0"
+  }
+}

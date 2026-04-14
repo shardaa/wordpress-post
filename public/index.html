@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WordPress Auto Publisher</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: #0b1020;
+        color: #f5f7fb;
+      }
+      main {
+        width: min(760px, calc(100vw - 32px));
+        text-align: center;
+      }
+      h1 {
+        margin: 0 0 12px;
+        font-size: 40px;
+        line-height: 1.1;
+      }
+      p {
+        margin: 0 0 24px;
+        color: #b8c2d6;
+        font-size: 16px;
+      }
+      button {
+        appearance: none;
+        border: 0;
+        border-radius: 8px;
+        background: #4f46e5;
+        color: white;
+        padding: 14px 28px;
+        font-size: 16px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      .panel {
+        margin-top: 28px;
+        text-align: left;
+        background: #141b34;
+        border: 1px solid #26304f;
+        border-radius: 8px;
+        padding: 18px;
+      }
+      .row {
+        margin-bottom: 10px;
+        color: #d8def0;
+      }
+      pre {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 13px;
+        line-height: 1.5;
+        color: #b8c2d6;
+        max-height: 320px;
+        overflow: auto;
+      }
+      a { color: #a5b4fc; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>WordPress Auto Publisher</h1>
+      <p>One click to research the next topic, write the article, and publish it to WordPress.</p>
+      <button id="generateBtn">Generate</button>
+
+      <section class="panel" id="statusPanel">
+        <div class="row"><strong>Status:</strong> <span id="statusText">Idle</span></div>
+        <div class="row"><strong>Current Topic:</strong> <span id="topicText">-</span></div>
+        <div class="row"><strong>Latest Post:</strong> <span id="postText">-</span></div>
+      </section>
+
+      <section class="panel" id="terminalPanel" hidden>
+        <div class="row"><strong>Live Run</strong></div>
+        <pre id="logs"></pre>
+      </section>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+  </html>
