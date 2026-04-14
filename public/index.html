@@ -55,6 +55,27 @@
         gap: 14px;
         align-items: center;
       }
+      .control-row {
+        width: 100%;
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 12px;
+      }
+      .topic-input {
+        width: 100%;
+        box-sizing: border-box;
+        border: 1px solid #24546f;
+        border-radius: 8px;
+        background: rgba(8, 15, 28, 0.96);
+        color: #e7eefb;
+        padding: 14px 16px;
+        font-size: 15px;
+        outline: none;
+      }
+      .topic-input:focus {
+        border-color: #3bc7ff;
+        box-shadow: 0 0 0 3px rgba(59, 199, 255, 0.14);
+      }
       .topic-box,
       .message-box {
         width: 100%;
@@ -156,11 +177,17 @@
       .terminal-header {
         display: flex;
         align-items: center;
+        justify-content: space-between;
         gap: 8px;
         margin-bottom: 12px;
         color: #8eb7c7;
         font-size: 13px;
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      .terminal-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
       }
       .dot {
         width: 10px;
@@ -171,6 +198,50 @@
       .dot.red { background: #ff5f57; }
       .dot.yellow { background: #febc2e; }
       .dot.green { background: #28c840; }
+      .terminal-shell {
+        position: relative;
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      .terminal-shell::after {
+        content: "";
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 0;
+        height: 60px;
+        background: linear-gradient(to bottom, rgba(32, 243, 174, 0.06), transparent);
+        animation: scan 3.6s linear infinite;
+        pointer-events: none;
+      }
+      .stage-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 14px;
+      }
+      .stage {
+        border: 1px solid #27465f;
+        border-radius: 999px;
+        padding: 6px 10px;
+        font-size: 12px;
+        letter-spacing: 0;
+        color: #8eb7c7;
+        background: rgba(7, 14, 25, 0.8);
+      }
+      .stage.active {
+        border-color: #20f3ae;
+        color: #d7fff0;
+        box-shadow: 0 0 0 1px rgba(32, 243, 174, 0.12);
+      }
+      .stage.done {
+        border-color: #1f8f5f;
+        color: #9ef0c6;
+      }
+      @keyframes scan {
+        0% { transform: translateY(-70px); }
+        100% { transform: translateY(420px); }
+      }
     </style>
   </head>
   <body>
@@ -187,6 +258,17 @@
             <button class="subtle-button" id="rotateTopicBtn" type="button">Rotate topic</button>
           </div>
         </section>
+
+        <div class="control-row">
+          <input
+            class="topic-input"
+            id="customTopicInput"
+            type="text"
+            placeholder="Or type a custom topic..."
+            autocomplete="off"
+          />
+          <button class="subtle-button" id="useTypedTopicBtn" type="button">Use typed topic</button>
+        </div>
 
         <button id="generateBtn">Generate</button>
 
@@ -210,12 +292,25 @@
 
       <section class="panel" id="terminalPanel" hidden>
         <div class="terminal-header">
-          <span class="dot red"></span>
-          <span class="dot yellow"></span>
-          <span class="dot green"></span>
-          <span>publisher.run</span>
+          <div class="terminal-title">
+            <span class="dot red"></span>
+            <span class="dot yellow"></span>
+            <span class="dot green"></span>
+            <span>publisher.run</span>
+          </div>
+          <span id="terminalMode">live</span>
         </div>
-        <pre id="logs"></pre>
+        <div class="stage-row" id="stageRow">
+          <span class="stage" data-stage="topic">TOPIC</span>
+          <span class="stage" data-stage="search">SEARCH</span>
+          <span class="stage" data-stage="research">RESEARCH</span>
+          <span class="stage" data-stage="write">WRITE</span>
+          <span class="stage" data-stage="upload">UPLOAD</span>
+          <span class="stage" data-stage="publish">PUBLISH</span>
+        </div>
+        <div class="terminal-shell">
+          <pre id="logs"></pre>
+        </div>
       </section>
     </main>
 
