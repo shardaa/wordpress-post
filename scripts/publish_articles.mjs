@@ -250,7 +250,7 @@ async function searchWebWithBrowser(topic) {
 
     if (!candidates.length) {
       console.warn("Browser search engines returned no results. Trying curated source fallback.");
-      return researchFromCuratedSources(context, topic, targetCount);
+      return await researchFromCuratedSources(context, topic, targetCount);
     }
 
     const researched = [];
