@@ -83,6 +83,7 @@ jobs:
 
       - name: Export HealingPoint runtime env
         run: |
+          cp healingpoint.env .env
           key="$(grep -E '^GEMINI_API_KEY=' healingpoint.env | tail -n 1 | cut -d= -f2-)"
           if [ -z "$key" ]; then
             echo "HealingPoint GEMINI_API_KEY is empty"
@@ -100,6 +101,7 @@ jobs:
 
       - name: Export Kafirana runtime env
         run: |
+          cp kafirana.env .env
           key="$(grep -E '^GEMINI_API_KEY=' kafirana.env | tail -n 1 | cut -d= -f2-)"
           if [ -z "$key" ]; then
             echo "Kafirana GEMINI_API_KEY is empty"
