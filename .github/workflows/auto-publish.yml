@@ -63,6 +63,8 @@ jobs:
             fi
             first_key="$(grep -E '^GEMINI_API_KEYS=' "$file" | head -n 1 | cut -d= -f2- | cut -d, -f1 | tr -d '[:space:]')"
             if [ -n "$first_key" ]; then
+              grep -Ev '^GEMINI_API_KEY=' "$file" > "$file.tmp"
+              mv "$file.tmp" "$file"
               printf '\nGEMINI_API_KEY=%s\n' "$first_key" >> "$file"
             fi
           }
@@ -70,12 +72,41 @@ jobs:
           normalize_gemini_key healingpoint.env
           normalize_gemini_key kafirana.env
 
+          if ! grep -Eq '^GEMINI_API_KEY=.+$' healingpoint.env; then
+            echo "Could not derive GEMINI_API_KEY for healingpoint.env"
+            exit 1
+          fi
+          if ! grep -Eq '^GEMINI_API_KEY=.+$' kafirana.env; then
+            echo "Could not derive GEMINI_API_KEY for kafirana.env"
+            exit 1
+          fi
+
+      - name: Export HealingPoint runtime env
+        run: |
+          key="$(grep -E '^GEMINI_API_KEY=' healingpoint.env | tail -n 1 | cut -d= -f2-)"
+          if [ -z "$key" ]; then
+            echo "HealingPoint GEMINI_API_KEY is empty"
+            exit 1
+          fi
+          echo "::add-mask::$key"
+          echo "GEMINI_API_KEY=$key" >> "$GITHUB_ENV"
+
       - name: Publish HealingPoint
         env:
           BROWSER_HEADLESS: "true"
           RANDOM_TOPIC: "true"
           ARTICLE_LIMIT: "1"
         run: node scripts/publish_articles.mjs --site=healingpoint --research=browser
+
+      - name: Export Kafirana runtime env
+        run: |
+          key="$(grep -E '^GEMINI_API_KEY=' kafirana.env | tail -n 1 | cut -d= -f2-)"
+          if [ -z "$key" ]; then
+            echo "Kafirana GEMINI_API_KEY is empty"
+            exit 1
+          fi
+          echo "::add-mask::$key"
+          echo "GEMINI_API_KEY=$key" >> "$GITHUB_ENV"
 
       - name: Publish Kafirana
         env:
