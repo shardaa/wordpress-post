@@ -56,6 +56,20 @@ jobs:
           printf '%s' "$HEALINGPOINT_ENV" > healingpoint.env
           printf '%s' "$KAFIRANA_ENV" > kafirana.env
 
+          normalize_gemini_key() {
+            file="$1"
+            if grep -Eq '^GEMINI_API_KEY=.+$' "$file"; then
+              return 0
+            fi
+            first_key="$(grep -E '^GEMINI_API_KEYS=' "$file" | head -n 1 | cut -d= -f2- | cut -d, -f1 | tr -d '[:space:]')"
+            if [ -n "$first_key" ]; then
+              printf '\nGEMINI_API_KEY=%s\n' "$first_key" >> "$file"
+            fi
+          }
+
+          normalize_gemini_key healingpoint.env
+          normalize_gemini_key kafirana.env
+
       - name: Publish HealingPoint
         env:
           BROWSER_HEADLESS: "true"
