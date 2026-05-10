@@ -1,0 +1,71 @@
+name: Auto publish WordPress articles
+
+on:
+  schedule:
+    - cron: "17 */4 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: wordpress-auto-publisher
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 210
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Restore publisher state
+        uses: actions/cache@v4
+        with:
+          path: |
+            state
+            output
+          key: publisher-state-${{ github.run_id }}
+          restore-keys: |
+            publisher-state-
+
+      - name: Create site env files
+        env:
+          HEALINGPOINT_ENV: ${{ secrets.HEALINGPOINT_ENV }}
+          KAFIRANA_ENV: ${{ secrets.KAFIRANA_ENV }}
+        run: |
+          if [ -z "$HEALINGPOINT_ENV" ]; then
+            echo "Missing GitHub secret: HEALINGPOINT_ENV"
+            exit 1
+          fi
+          if [ -z "$KAFIRANA_ENV" ]; then
+            echo "Missing GitHub secret: KAFIRANA_ENV"
+            exit 1
+          fi
+          printf '%s' "$HEALINGPOINT_ENV" > healingpoint.env
+          printf '%s' "$KAFIRANA_ENV" > kafirana.env
+
+      - name: Publish HealingPoint
+        env:
+          BROWSER_HEADLESS: "true"
+          RANDOM_TOPIC: "true"
+          ARTICLE_LIMIT: "1"
+        run: node scripts/publish_articles.mjs --site=healingpoint --research=browser
+
+      - name: Publish Kafirana
+        env:
+          BROWSER_HEADLESS: "true"
+          RANDOM_TOPIC: "true"
+          ARTICLE_LIMIT: "1"
+        run: node scripts/publish_articles.mjs --site=kafirana --research=browser

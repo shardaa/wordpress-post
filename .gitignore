@@ -1,4 +1,7 @@
 .env
+*.env
 node_modules/
 output/
 state/
+logs/
+.DS_Store
