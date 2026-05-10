@@ -697,16 +697,88 @@ function extractOpenAIText(json) {
 
 function parseJsonObject(raw) {
   const cleaned = raw.trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```$/i, "").trim();
-  try {
-    return JSON.parse(cleaned);
-  } catch {
-    const start = cleaned.indexOf("{");
-    const end = cleaned.lastIndexOf("}");
-    if (start >= 0 && end > start) {
-      return JSON.parse(cleaned.slice(start, end + 1));
+  const objectText = extractObjectText(cleaned);
+  const attempts = [cleaned];
+  if (objectText && objectText !== cleaned) attempts.push(objectText);
+
+  for (const candidate of attempts) {
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      // Try the next candidate.
     }
-    throw new Error(`AI did not return valid JSON:\n${raw}`);
   }
+
+  const repaired = repairArticleJson(objectText || cleaned);
+  if (repaired) return repaired;
+
+  throw new Error(`AI did not return valid JSON. First 500 chars:\n${cleaned.slice(0, 500)}`);
+}
+
+function extractObjectText(value) {
+  const start = value.indexOf("{");
+  const end = value.lastIndexOf("}");
+  if (start >= 0 && end > start) return value.slice(start, end + 1);
+  return "";
+}
+
+function repairArticleJson(value) {
+  const title = extractJsonStringField(value, "title");
+  const slug = extractJsonStringField(value, "slug");
+  const metaDescription = extractJsonStringField(value, "metaDescription");
+  const focusKeyword = extractJsonStringField(value, "focusKeyword");
+  const articleHtml = extractJsonStringField(value, "articleHtml");
+
+  if (!title || !articleHtml) return null;
+
+  return {
+    title,
+    slug: slug || title,
+    metaDescription: metaDescription || "",
+    focusKeyword: focusKeyword || title,
+    secondaryKeywords: [],
+    articleHtml,
+    imagePrompts: [],
+  };
+}
+
+function extractJsonStringField(value, fieldName) {
+  const keyPattern = new RegExp(`"${fieldName}"\\s*:\\s*"`, "g");
+  const keyMatch = keyPattern.exec(value);
+  if (!keyMatch) return "";
+
+  let result = "";
+  let escaped = false;
+  for (let index = keyPattern.lastIndex; index < value.length; index += 1) {
+    const char = value[index];
+    if (escaped) {
+      result += char;
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      result += char;
+      escaped = true;
+      continue;
+    }
+    if (char !== "\"") {
+      result += char;
+      continue;
+    }
+
+    const rest = value.slice(index + 1);
+    if (/^\s*(,\s*"[A-Za-z0-9_]+"\s*:|})/.test(rest)) {
+      try {
+        return JSON.parse(`"${result}"`);
+      } catch {
+        return result.replace(/\\"/g, "\"");
+      }
+    }
+
+    result += char;
+  }
+
+  return result;
 }
 
 async function uploadImages(images, slug) {
