@@ -1,11 +1,142 @@
 #!/usr/bin/env node
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import dns from "node:dns";
+import http from "node:http";
+import https from "node:https";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dryRun = process.argv.includes("--dry-run");
-const researchMode = getArgValue("--research") || process.env.RESEARCH_MODE || "browser";
+const selectedSite = getArgValue("--site").trim() || process.env.SITE || "";
+
+const originalFetch = typeof globalThis.fetch === "function" ? globalThis.fetch : null;
+const fetch = originalFetch ? fetchWithDnsFallback : dnsFetch;
+
+function isDnsResolutionFailure(error) {
+  const message = String(error?.message || "");
+  const causeCode = error?.cause?.code;
+  return (
+    /ENOTFOUND|EAI_AGAIN|getaddrinfo/i.test(message) ||
+    causeCode === "ENOTFOUND" ||
+    causeCode === "EAI_AGAIN"
+  );
+}
+
+function formatNetworkError(error) {
+  const message = String(error?.message || error || "unknown error");
+  const causeCode = error?.cause?.code;
+  const causeMessage = error?.cause?.message;
+  const name = error?.name;
+
+  if (name === "AbortError" || /aborted|abort/i.test(message)) {
+    return `request timed out or was aborted (${message})`;
+  }
+  if (causeCode || causeMessage) {
+    return `${message}; cause=${[causeCode, causeMessage].filter(Boolean).join(" ")}`;
+  }
+  return message;
+}
+
+async function fetchWithDnsFallback(url, options = {}) {
+  try {
+    return await originalFetch(url, options);
+  } catch (error) {
+    if (isDnsResolutionFailure(error) && typeof url === "string") {
+      console.warn(
+        `fetch failed for ${url}. Falling back to custom DNS fetch because of DNS resolution error.`,
+      );
+      return dnsFetch(url, options);
+    }
+    throw error;
+  }
+}
+
+async function resolveHost(hostname) {
+  const addresses = [];
+  try {
+    const v4 = await dns.promises.resolve4(hostname);
+    addresses.push(...v4.map((address) => ({ address, family: 4 })));
+  } catch {
+    // ignore v4 resolution failures and try v6.
+  }
+  try {
+    const v6 = await dns.promises.resolve6(hostname);
+    addresses.push(...v6.map((address) => ({ address, family: 6 })));
+  } catch {
+    // ignore v6 resolution failures.
+  }
+  if (!addresses.length) {
+    throw new Error(`DNS lookup failed for hostname: ${hostname}`);
+  }
+  return addresses;
+}
+
+async function dnsFetch(input, options = {}) {
+  const url = new URL(input);
+  const addresses = await resolveHost(url.hostname);
+  if (!addresses?.length) {
+    throw new Error(`DNS lookup failed for hostname: ${url.hostname}`);
+  }
+
+  const address =
+    addresses.find((entry) => entry.family === 4) || addresses[0];
+  const isHttps = url.protocol === "https:";
+  const requestOptions = {
+    protocol: url.protocol,
+    hostname: address.address,
+    port:
+      url.port || (isHttps ? 443 : 80),
+    path: `${url.pathname}${url.search}`,
+    method: options.method || "GET",
+    headers: options.headers || {},
+    servername: url.hostname,
+    timeout: options.timeout || 0,
+  };
+
+  return new Promise((resolve, reject) => {
+    const req = (isHttps ? https.request : http.request)(
+      requestOptions,
+      (res) => {
+        const response = new Response(res, {
+          status: res.statusCode,
+          statusText: res.statusMessage,
+          headers: res.headers,
+        });
+        resolve(response);
+      },
+    );
+
+    req.on("error", reject);
+    if (options.signal) {
+      if (options.signal.aborted) {
+        req.destroy(new Error("The operation was aborted."));
+      } else {
+        options.signal.addEventListener("abort", () => {
+          req.destroy(new Error("The operation was aborted."));
+        });
+      }
+    }
+
+    if (options.body != null) {
+      const body = options.body;
+      if (typeof body === "string" || body instanceof Buffer) {
+        req.write(body);
+      } else if (body instanceof ArrayBuffer || ArrayBuffer.isView(body)) {
+        req.write(Buffer.from(body));
+      } else if (typeof body.pipe === "function") {
+        body.pipe(req);
+        return;
+      } else if (typeof body === "object") {
+        req.write(JSON.stringify(body));
+      } else {
+        req.write(String(body));
+      }
+    }
+
+    req.end();
+  });
+}
 const customTopic = getArgValue("--topic").trim();
 let wordpressAccessVerified = false;
 let cachedCategoryIds = null;
@@ -18,29 +149,61 @@ try {
 }
 
 async function main() {
-  await loadLocalEnv(path.join(root, ".env"));
+  const envPath = await resolveEnvPath();
+  await loadLocalEnv(envPath);
+  const researchMode =
+    getArgValue("--research") || process.env.RESEARCH_MODE || "browser";
+  const topicsPath = resolveTopicsPath();
+  const processedPath = resolveProcessedPath();
 
-  const topics = await readTopics();
-  const processed = await readProcessed();
-  const pending = customTopic
-    ? [customTopic]
-    : topics.filter((topic) => !processed[topic]);
-  const limit = Number(process.env.ARTICLE_LIMIT || 0);
-  const selected = limit > 0 ? pending.slice(0, limit) : pending;
+  console.log(`Using env: ${path.basename(envPath)}`);
+  if (selectedSite) {
+    console.log(`Using site profile: ${selectedSite}`);
+  }
+  console.log(`Using topics: ${path.basename(topicsPath)}`);
+  console.log(`Using state: ${path.relative(root, processedPath)}`);
 
-  if (!selected.length) {
-    console.log("No pending topics. Add topics to wordpress-auto-publisher/topics.txt or clear state/processed.json.");
+  const siteContext = await readSiteContext();
+  const internalLinks = await readInternalLinks();
+  const topics = await readTopics(topicsPath);
+  const processed = await readProcessed(processedPath);
+  const useRandom = getBooleanEnv("RANDOM_TOPIC", false);
+  const pendingTopics = topics.filter((topic) => !processed[topic]);
+  let runnableTopics = customTopic ? [customTopic] : pendingTopics;
+
+  if (!runnableTopics.length) {
+    runnableTopics = topics;
+  }
+
+  const limit = Number(process.env.ARTICLE_LIMIT || (useRandom ? 1 : 0));
+
+  if (!runnableTopics.length) {
+    console.log(`No pending topics found. All topics already processed.`);
     return;
   }
 
-  await mkdir(path.join(root, "output"), { recursive: true });
+  const selected = limit > 0 ? getRandomItems(runnableTopics, limit) : runnableTopics;
+
+  if (!selected.length) {
+    console.log(`No topics found. Add topics to ${path.basename(topicsPath)}.`);
+    return;
+  }
+
   await mkdir(path.join(root, "state"), { recursive: true });
+  await writeFile(processedPath, JSON.stringify(processed, null, 2)).catch(
+    () => {},
+  );
 
   for (const topic of selected) {
     console.log(`Researching: ${topic}`);
     const research = await searchWeb(topic, researchMode);
-    const images = await searchImages(topic, research);
-    const article = await generateArticle(topic, research);
+    console.log("Starting image selection...");
+    const images = await searchImages(topic, research, researchMode);
+    console.log("Starting article generation...");
+    const article = await generateArticle(topic, research, {
+      siteContext,
+      internalLinks,
+    });
     const safeSlug = slugify(article.slug || article.title || topic);
 
     let uploadedImages = [];
@@ -48,9 +211,24 @@ async function main() {
 
     if (!dryRun && getBooleanEnv("AUTO_UPLOAD_IMAGES", true)) {
       uploadedImages = await uploadImages(images, safeSlug);
+      await markUsedImages(uploadedImages);
     }
 
-    const html = buildPostHtml(article, research, uploadedImages);
+    const html = buildPostHtml(
+      article,
+      research,
+      uploadedImages,
+      safeSlug,
+      internalLinks,
+    );
+    runSeoQualityGate({
+      article,
+      html,
+      research,
+      images: uploadedImages,
+      internalLinks,
+      slug: safeSlug,
+    });
 
     if (!dryRun) {
       wordpressPost = await createWordPressPost({
@@ -58,40 +236,36 @@ async function main() {
         content: html,
         excerpt: article.metaDescription,
         slug: safeSlug,
-        featuredMedia: uploadedImages[0]?.id
+        featuredMedia: uploadedImages[0]?.id,
       });
-      console.log(`WordPress post created: ${wordpressPost.link || wordpressPost.id}`);
-    } else {
-      console.log("Dry run enabled: skipped image upload and WordPress post creation.");
-    }
-
-    const output = {
-      topic,
-      createdAt: new Date().toISOString(),
-      dryRun,
-      research,
-      images,
-      uploadedImages,
-      article,
-      wordpressPost
-    };
-
-    await writeFile(
-      path.join(root, "output", `${safeSlug}.json`),
-      JSON.stringify(output, null, 2)
-    );
-    await writeFile(path.join(root, "output", `${safeSlug}.html`), html);
-
-    if (!customTopic) {
-      processed[topic] = {
-        createdAt: new Date().toISOString(),
+      console.log(
+        `WordPress post created: ${wordpressPost.link || wordpressPost.id}`,
+      );
+      await updateLlmsTxt({
+        title: article.title,
+        topic,
+        url: wordpressPost.link || null,
+      });
+      await writeSocialContentOutput({
+        article,
+        topic,
+        url: wordpressPost.link || null,
         slug: safeSlug,
-        wordpressId: wordpressPost?.id || null,
-        wordpressLink: wordpressPost?.link || null,
-        dryRun
-      };
-      await writeFile(path.join(root, "state", "processed.json"), JSON.stringify(processed, null, 2));
+      });
+    } else {
+      console.log(
+        "Dry run enabled: skipped image upload and WordPress post creation.",
+      );
     }
+
+    processed[topic] = {
+      createdAt: new Date().toISOString(),
+      slug: safeSlug,
+      wordpressId: wordpressPost?.id || null,
+      wordpressLink: wordpressPost?.link || null,
+      dryRun,
+    };
+    await writeFile(processedPath, JSON.stringify(processed, null, 2));
   }
 }
 
@@ -100,87 +274,235 @@ async function loadLocalEnv(envPath) {
     const envText = await readFile(envPath, "utf8");
     for (const line of envText.split(/\r?\n/)) {
       const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#") || !trimmed.includes("=")) continue;
+      if (!trimmed || trimmed.startsWith("#") || !trimmed.includes("="))
+        continue;
       const [key, ...valueParts] = trimmed.split("=");
-      if (!process.env[key]) {
-        const rawValue = valueParts.join("=").trim();
-        const normalized = rawValue.startsWith('"') || rawValue.startsWith("'")
+      const rawValue = valueParts.join("=").trim();
+      const normalized =
+        rawValue.startsWith('"') || rawValue.startsWith("'")
           ? rawValue.replace(/^["']|["']$/g, "")
           : rawValue.replace(/\s+#.*$/, "").trim();
-        process.env[key] = normalized;
-      }
+      const value = normalized.startsWith(`${key}=`)
+        ? normalized.slice(key.length + 1)
+        : normalized;
+      if (shouldPreserveRuntimeEnv(key)) continue;
+      process.env[key] = value;
     }
   } catch {
     // .env is optional if shell environment variables are already set.
   }
 }
 
-async function readTopics() {
-  const text = await readFile(path.join(root, "topics.txt"), "utf8");
+function shouldPreserveRuntimeEnv(key) {
+  const runtimeOverrideKeys = new Set([
+    "ARTICLE_LIMIT",
+    "RANDOM_TOPIC",
+    "BROWSER_HEADLESS",
+    "RESEARCH_MODE",
+    "SEARCH_ENGINES",
+    "SEARCH_WAIT_MS",
+    "PAGE_WAIT_MS",
+    "SEARCH_PAGE_TIMEOUT_MS",
+    "SOURCE_PAGE_TIMEOUT_MS",
+    "BROWSER_MAX_CANDIDATES",
+    "PORT",
+    "SITE",
+  ]);
+  return runtimeOverrideKeys.has(key) && process.env[key] !== undefined;
+}
+
+async function resolveEnvPath() {
+  const explicitEnvFile = process.env.ENV_FILE || getArgValue("--env");
+  const siteEnvCandidate = selectedSite
+    ? path.join(root, `${selectedSite}.env`)
+    : "";
+  const candidates = [
+    explicitEnvFile ? path.resolve(root, explicitEnvFile) : "",
+    siteEnvCandidate,
+    path.join(root, ".env"),
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    try {
+      await readFile(candidate, "utf8");
+      return candidate;
+    } catch {
+      // Try next candidate.
+    }
+  }
+
+  throw new Error(
+    selectedSite
+      ? `Could not find an env file for site "${selectedSite}". Expected ${selectedSite}.env or use --env=filename.`
+      : "Could not find an env file. Add .env or pass --env=filename.",
+  );
+}
+
+function resolveTopicsPath() {
+  const explicitTopics = (
+    process.env.TOPICS_FILE || getArgValue("--topics")
+  ).trim();
+  if (explicitTopics) return path.resolve(root, explicitTopics);
+  if (selectedSite) {
+    return path.join(root, `topics.${selectedSite}.txt`);
+  }
+  return path.join(root, "topics.txt");
+}
+
+function resolveProcessedPath() {
+  const explicitState = (
+    process.env.STATE_FILE || getArgValue("--state")
+  ).trim();
+  if (explicitState) return path.resolve(root, explicitState);
+  if (selectedSite) {
+    return path.join(root, "state", `processed.${selectedSite}.json`);
+  }
+  return path.join(root, "state", "processed.json");
+}
+
+function resolveLlmsPath() {
+  const explicitLlms = (process.env.LLMS_FILE || getArgValue("--llms")).trim();
+  if (explicitLlms) return path.resolve(root, explicitLlms);
+  if (selectedSite) {
+    return path.join(root, `llms.${selectedSite}.txt`);
+  }
+  return path.join(root, "llms.txt");
+}
+
+async function readTopics(topicsPath) {
+  const text = await readFileWithFallback(
+    topicsPath,
+    selectedSite ? path.join(root, "topics.txt") : "",
+  );
   return text
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line && !line.startsWith("#"));
 }
 
-async function readProcessed() {
+async function readProcessed(processedPath) {
   try {
-    return JSON.parse(await readFile(path.join(root, "state", "processed.json"), "utf8"));
+    return JSON.parse(await readFile(processedPath, "utf8"));
   } catch {
+    if (selectedSite) return {};
     return {};
   }
 }
 
-async function searchWeb(topic, mode) {
-  if (mode === "browser") {
-    return searchWebWithBrowser(topic);
+async function readSiteContext() {
+  const contextPath = path.join(root, ".agents", "product-marketing-context.md");
+  try {
+    const fullContext = await readFile(contextPath, "utf8");
+    const section = extractMarkdownSection(fullContext, selectedSite);
+    return section || fullContext;
+  } catch {
+    return "";
   }
-
-  const days = process.env.SEARCH_DAYS || "30";
-  const query = `${topic} latest news OR updates`;
-  const results = await googleSearch(query, {
-    num: Number(process.env.SEARCH_RESULTS_PER_TOPIC || 8),
-    dateRestrict: `d${days}`
-  });
-
-  return results.map((item) => ({
-    title: item.title,
-    link: item.link,
-    snippet: item.snippet,
-    source: item.displayLink,
-    publishedHint: item.pagemap?.metatags?.[0]?.["article:published_time"] || null
-  }));
 }
 
-async function searchImages(topic, research = []) {
-  if (researchMode === "browser") {
-    return searchImagesFromResearch(topic, research);
+async function readInternalLinks() {
+  const explicitLinks = (
+    process.env.INTERNAL_LINKS_FILE || getArgValue("--internal-links")
+  ).trim();
+  const candidates = [
+    explicitLinks ? path.resolve(root, explicitLinks) : "",
+    selectedSite ? path.join(root, "data", `internal-links.${selectedSite}.json`) : "",
+    path.join(root, "data", "internal-links.json"),
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    try {
+      const links = JSON.parse(await readFile(candidate, "utf8"));
+      return Array.isArray(links) ? normalizeInternalLinks(links) : [];
+    } catch {
+      // Try the next links file.
+    }
   }
 
-  const results = await googleSearch(topic, {
-    num: Number(process.env.IMAGE_RESULTS_PER_TOPIC || 3),
-    searchType: "image",
-    imgSize: "large",
-    safe: "active"
-  });
+  return [];
+}
 
-  return results.map((item) => ({
-    title: item.title,
-    link: item.link,
-    contextLink: item.image?.contextLink || item.link,
-    mime: item.mime || "image/jpeg",
-    source: item.displayLink
-  }));
+function normalizeInternalLinks(links) {
+  return links
+    .map((link) => ({
+      keyword: String(link.keyword || link.anchor || "").trim(),
+      anchor: String(link.anchor || link.keyword || "").trim(),
+      url: String(link.url || "").trim(),
+    }))
+    .filter((link) => link.anchor && /^https?:\/\//i.test(link.url));
+}
+
+function extractMarkdownSection(markdown, sectionName) {
+  const normalizedSection = String(sectionName || "").trim().toLowerCase();
+  if (!normalizedSection) return "";
+
+  const lines = markdown.split(/\r?\n/);
+  const start = lines.findIndex((line) => {
+    const match = line.match(/^##\s+(.+?)\s*$/);
+    return match && match[1].trim().toLowerCase() === normalizedSection;
+  });
+  if (start === -1) return "";
+
+  let end = start + 1;
+  while (end < lines.length && !/^##\s+/.test(lines[end])) {
+    end += 1;
+  }
+
+  return lines.slice(start, end).join("\n").trim();
+}
+
+async function readFileWithFallback(primaryPath, fallbackPath) {
+  try {
+    return await readFile(primaryPath, "utf8");
+  } catch (error) {
+    if (!fallbackPath) throw error;
+    return readFile(fallbackPath, "utf8");
+  }
+}
+
+async function searchWeb(topic, mode) {
+  if (mode !== "browser") {
+    console.log(
+      "Google Custom Search API mode is temporarily disabled. Using browser research instead.",
+    );
+  }
+
+  // Google Custom Search API path intentionally disabled for now.
+  // Keep the helper below in place so it can be restored later if needed.
+  return searchWebWithBrowser(topic);
+}
+
+async function searchImages(topic, research = [], mode = "browser") {
+  if (mode !== "browser") {
+    console.log(
+      "Google Custom Search API image mode is temporarily disabled. Using images from researched pages instead.",
+    );
+  }
+
+  // Google Custom Search API image path intentionally disabled for now.
+  return searchImagesFromResearch(topic, research);
+}
+
+function shouldFallbackToBrowser(error, mode) {
+  if (mode !== "api") return false;
+  const message = String(error?.message || "");
+  return (
+    message.includes("Google search failed:") ||
+    message.includes("Missing GOOGLE_CSE_API_KEY") ||
+    message.includes("Missing GOOGLE_CSE_ID")
+  );
 }
 
 async function googleSearch(query, extraParams = {}) {
   const key = process.env.GOOGLE_CSE_API_KEY;
   const cx = process.env.GOOGLE_CSE_ID;
   if (!key || !cx) {
-    throw new Error("Missing GOOGLE_CSE_API_KEY or GOOGLE_CSE_ID in wordpress-auto-publisher/.env.");
+    throw new Error(
+      "Missing GOOGLE_CSE_API_KEY or GOOGLE_CSE_ID in wordpress-auto-publisher/.env.",
+    );
   }
 
-  const url = new URL("https://www.googleapis.com/customsearch/v1");
+  const url = new URL("https://customsearch.googleapis.com/customsearch/v1");
   url.searchParams.set("key", key);
   url.searchParams.set("cx", cx);
   url.searchParams.set("q", query);
@@ -216,17 +538,19 @@ async function searchWebWithBrowser(topic) {
   }
 
   const browser = await chromium.launch({
-    headless
+    headless,
   });
   const context = await browser.newContext({
     userAgent:
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36"
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36",
   });
 
   try {
     const seen = new Set();
     const candidates = [];
-    const candidateCap = Number(process.env.BROWSER_MAX_CANDIDATES || targetCount * 2);
+    const candidateCap = Number(
+      process.env.BROWSER_MAX_CANDIDATES || targetCount * 2,
+    );
 
     for (const engine of engines) {
       console.log(`Trying search engine: ${engine}`);
@@ -249,17 +573,30 @@ async function searchWebWithBrowser(topic) {
     }
 
     if (!candidates.length) {
-      console.warn("Browser search engines returned no results. Trying curated source fallback.");
+      console.warn(
+        "Browser search engines returned no results. Trying curated source fallback.",
+      );
       return await researchFromCuratedSources(context, topic, targetCount);
     }
 
     const researched = [];
+    const readLinks = new Set();
     for (const candidate of candidates) {
       if (researched.length >= targetCount) break;
       const page = await context.newPage();
-      console.log(`Reading source ${researched.length + 1}/${targetCount}: ${candidate.link}`);
+      console.log(
+        `Reading source ${researched.length + 1}/${targetCount}: ${candidate.link}`,
+      );
       try {
-        researched.push(await extractPageSummary(page, candidate));
+        const summary = await extractPageSummary(page, candidate);
+        const expanded = await expandNewsHubSummary({
+          context,
+          summary,
+          topic,
+          readLinks,
+          remaining: targetCount - researched.length,
+        });
+        researched.push(...expanded);
       } catch (error) {
         console.warn(`Source skipped: ${candidate.link} (${error.message})`);
       } finally {
@@ -274,19 +611,26 @@ async function searchWebWithBrowser(topic) {
 }
 
 async function researchFromCuratedSources(context, topic, targetCount) {
-  const sourceUrls = getCuratedSourceUrls(topic).slice(0, Number(process.env.CURATED_SOURCE_LIMIT || 10));
+  const sourceUrls = getCuratedSourceUrls(topic).slice(
+    0,
+    Number(process.env.CURATED_SOURCE_LIMIT || 10),
+  );
   const researched = [];
 
   for (const sourceUrl of sourceUrls) {
     if (researched.length >= targetCount) break;
     const page = await context.newPage();
-    console.log(`Reading curated source ${researched.length + 1}/${Math.min(targetCount, sourceUrls.length)}: ${sourceUrl}`);
+    console.log(
+      `Reading curated source ${researched.length + 1}/${Math.min(targetCount, sourceUrls.length)}: ${sourceUrl}`,
+    );
     try {
       const summary = await extractCuratedSourceSummary(page, sourceUrl, topic);
       if (isRelevantCuratedSummary(summary, topic)) {
         researched.push(summary);
       } else {
-        console.warn(`Curated source skipped: ${sourceUrl} (not relevant enough for topic)`);
+        console.warn(
+          `Curated source skipped: ${sourceUrl} (not relevant enough for topic)`,
+        );
       }
     } catch (error) {
       console.warn(`Curated source skipped: ${sourceUrl} (${error.message})`);
@@ -296,7 +640,9 @@ async function researchFromCuratedSources(context, topic, targetCount) {
   }
 
   if (!researched.length) {
-    throw new Error("Browser research found no results, and curated fallback sources were not usable.");
+    throw new Error(
+      "Browser research found no results, and curated fallback sources were not usable.",
+    );
   }
 
   return researched;
@@ -312,18 +658,23 @@ async function getPlaywright() {
         "Install it with:",
         "  npm install -w wordpress-auto-publisher playwright",
         "  npx playwright install chromium",
-        "Or run the older API mode with --research=api."
-      ].join("\n")
+        "Or run the older API mode with --research=api.",
+      ].join("\n"),
     );
   }
 }
 
 async function searchEngineLinks(page, engine, query) {
   const url = searchUrl(engine, query);
-  await page.goto(url, { waitUntil: "domcontentloaded", timeout: Number(process.env.SEARCH_PAGE_TIMEOUT_MS || 20000) });
+  await page.goto(url, {
+    waitUntil: "domcontentloaded",
+    timeout: Number(process.env.SEARCH_PAGE_TIMEOUT_MS || 20000),
+  });
   await page.waitForTimeout(Number(process.env.SEARCH_WAIT_MS || 2500));
 
-  const pageText = (await page.locator("body").innerText({ timeout: 5000 })).toLowerCase();
+  const pageText = (
+    await page.locator("body").innerText({ timeout: 5000 })
+  ).toLowerCase();
   if (pageText.includes("unusual traffic") || pageText.includes("captcha")) {
     throw new Error("captcha or automated traffic page detected");
   }
@@ -332,29 +683,31 @@ async function searchEngineLinks(page, engine, query) {
     const text = (node) => node?.textContent?.replace(/\s+/g, " ").trim() || "";
 
     if (currentEngine === "bing") {
-      return Array.from(document.querySelectorAll("li.b_algo h2 a")).map((anchor) => ({
-        text: text(anchor),
-        href: anchor.href,
-        engine: currentEngine
-      }));
+      return Array.from(document.querySelectorAll("li.b_algo h2 a")).map(
+        (anchor) => ({
+          text: text(anchor),
+          href: anchor.href,
+          engine: currentEngine,
+        }),
+      );
     }
 
     if (currentEngine === "duckduckgo") {
       const selectors = [
         ...Array.from(document.querySelectorAll("a.result__a")),
-        ...Array.from(document.querySelectorAll("h2 a"))
+        ...Array.from(document.querySelectorAll("h2 a")),
       ];
       return selectors.map((anchor) => ({
         text: text(anchor),
         href: anchor.href,
-        engine: currentEngine
+        engine: currentEngine,
       }));
     }
 
     return Array.from(document.querySelectorAll("a")).map((anchor) => ({
       text: text(anchor),
       href: anchor.href,
-      engine: currentEngine
+      engine: currentEngine,
     }));
   }, engine);
 
@@ -366,8 +719,10 @@ async function searchEngineLinks(page, engine, query) {
 
 function searchUrl(engine, query) {
   const encoded = encodeURIComponent(query);
-  if (engine === "bing") return `https://www.bing.com/search?q=${encoded}&freshness=Month`;
-  if (engine === "duckduckgo") return `https://html.duckduckgo.com/html/?q=${encoded}`;
+  if (engine === "bing")
+    return `https://www.bing.com/search?q=${encoded}&freshness=Month`;
+  if (engine === "duckduckgo")
+    return `https://html.duckduckgo.com/html/?q=${encoded}`;
   return `https://www.google.com/search?q=${encoded}&tbm=nws`;
 }
 
@@ -377,7 +732,10 @@ function normalizeSearchHref(href) {
     if (url.hostname.includes("google.") && url.pathname === "/url") {
       return url.searchParams.get("q") || href;
     }
-    if (url.hostname.includes("duckduckgo.com") && url.searchParams.get("uddg")) {
+    if (
+      url.hostname.includes("duckduckgo.com") &&
+      url.searchParams.get("uddg")
+    ) {
       return decodeURIComponent(url.searchParams.get("uddg"));
     }
     return href;
@@ -391,7 +749,9 @@ function isUsefulSearchResult(link, text) {
   try {
     const url = new URL(link);
     const host = url.hostname.replace(/^www\./, "");
+    const path = url.pathname || "/";
     if (!["http:", "https:"].includes(url.protocol)) return false;
+    if (url.hash && (!path || path === "/")) return false;
     if (
       host.includes("google.") ||
       host.includes("bing.com") ||
@@ -402,6 +762,13 @@ function isUsefulSearchResult(link, text) {
     ) {
       return false;
     }
+    if (
+      /\/(audio|podcasts?|shows?|videos?|watch|listen)\//i.test(path) ||
+      /\/#?$/.test(path) ||
+      path === "/"
+    ) {
+      return false;
+    }
     return true;
   } catch {
     return false;
@@ -409,11 +776,15 @@ function isUsefulSearchResult(link, text) {
 }
 
 async function extractPageSummary(page, candidate) {
-  await page.goto(candidate.link, { waitUntil: "domcontentloaded", timeout: Number(process.env.SOURCE_PAGE_TIMEOUT_MS || 20000) });
+  await page.goto(candidate.link, {
+    waitUntil: "domcontentloaded",
+    timeout: Number(process.env.SOURCE_PAGE_TIMEOUT_MS || 20000),
+  });
   await page.waitForTimeout(Number(process.env.PAGE_WAIT_MS || 1500));
 
   return page.evaluate((input) => {
-    const getMeta = (selector) => document.querySelector(selector)?.getAttribute("content") || "";
+    const getMeta = (selector) =>
+      document.querySelector(selector)?.getAttribute("content") || "";
     const paragraphs = Array.from(document.querySelectorAll("p"))
       .map((node) => node.textContent?.replace(/\s+/g, " ").trim() || "")
       .filter((text) => text.length > 80)
@@ -423,6 +794,55 @@ async function extractPageSummary(page, candidate) {
       .map((node) => node.textContent?.replace(/\s+/g, " ").trim() || "")
       .filter(Boolean)
       .slice(0, 10);
+
+    const imageCandidates = [];
+    const ogImage = getMeta('meta[property="og:image"]');
+    const twitterImage = getMeta('meta[name="twitter:image"]');
+    if (ogImage) imageCandidates.push(ogImage);
+    if (twitterImage && twitterImage !== ogImage) imageCandidates.push(twitterImage);
+
+    const imageNodes = Array.from(document.images);
+    imageNodes.forEach((node) => {
+      const src = node.currentSrc || node.src || "";
+      if (
+        src &&
+        !src.startsWith("data:") &&
+        /^https?:\/\//i.test(src) &&
+        !imageCandidates.includes(src)
+      ) {
+        imageCandidates.push(src);
+      }
+    });
+
+    const images = imageCandidates.map((url) => {
+      const node = imageNodes.find(
+        (image) => image.currentSrc === url || image.src === url,
+      );
+      return {
+        url,
+        width: node?.naturalWidth || 0,
+        height: node?.naturalHeight || 0,
+      };
+    });
+
+    const bestImage = images.sort(
+      (a, b) => b.width * b.height - a.width * a.height,
+    )[0];
+    const articleLinks = Array.from(document.querySelectorAll("a"))
+      .map((anchor) => ({
+        text: anchor.textContent?.replace(/\s+/g, " ").trim() || "",
+        href: anchor.href,
+      }))
+      .filter((link) => link.text.length > 18 && /^https?:\/\//i.test(link.href))
+      .filter((link) => {
+        try {
+          const url = new URL(link.href);
+          return url.hostname.replace(/^www\./, "") === location.hostname.replace(/^www\./, "");
+        } catch {
+          return false;
+        }
+      })
+      .slice(0, 12);
 
     return {
       title: document.title || input.text,
@@ -436,42 +856,149 @@ async function extractPageSummary(page, candidate) {
         null,
       headings,
       keyPoints: paragraphs,
-      image: getMeta('meta[property="og:image"]') || getMeta('meta[name="twitter:image"]') || null
+      image: bestImage?.url || null,
+      images,
+      articleLinks,
     };
   }, candidate);
 }
 
+async function expandNewsHubSummary({
+  context,
+  summary,
+  topic,
+  readLinks,
+  remaining,
+}) {
+  if (!shouldExpandNewsHub(summary) || remaining <= 1) {
+    readLinks.add(summary.link);
+    return [summary];
+  }
+
+  const expanded = [];
+  const links = (summary.articleLinks || [])
+    .filter((link) => isUsefulSearchResult(link.href, link.text))
+    .filter((link) => !readLinks.has(link.href))
+    .slice(0, Math.min(3, remaining));
+
+  for (const link of links) {
+    const page = await context.newPage();
+    try {
+      readLinks.add(link.href);
+      console.log(`Reading article from news hub: ${link.href}`);
+      const articleSummary = await extractPageSummary(page, {
+        text: link.text,
+        link: link.href,
+      });
+      if (isRelevantCuratedSummary(articleSummary, topic)) {
+        expanded.push(articleSummary);
+      }
+    } catch (error) {
+      console.warn(`Hub article skipped: ${link.href} (${error.message})`);
+    } finally {
+      await page.close();
+    }
+  }
+
+  if (expanded.length) return expanded;
+  readLinks.add(summary.link);
+  return [summary];
+}
+
+function shouldExpandNewsHub(summary) {
+  if (!selectedSite.toLowerCase().includes("kafirana")) return false;
+  try {
+    const url = new URL(summary.link);
+    const pathParts = url.pathname.split("/").filter(Boolean);
+    const hubLikePath =
+      pathParts.length <= 1 ||
+      /^(us|news|world|politics|entertainment|latest|trending)$/i.test(
+        pathParts.at(-1) || "",
+      );
+    return hubLikePath && (summary.articleLinks || []).length > 0;
+  } catch {
+    return false;
+  }
+}
+
 async function extractCuratedSourceSummary(page, sourceUrl, topic) {
-  await page.goto(sourceUrl, { waitUntil: "domcontentloaded", timeout: Number(process.env.SOURCE_PAGE_TIMEOUT_MS || 20000) });
+  await page.goto(sourceUrl, {
+    waitUntil: "domcontentloaded",
+    timeout: Number(process.env.SOURCE_PAGE_TIMEOUT_MS || 20000),
+  });
   await page.waitForTimeout(Number(process.env.PAGE_WAIT_MS || 1500));
 
-  return page.evaluate((input) => {
-    const getMeta = (selector) => document.querySelector(selector)?.getAttribute("content") || "";
-    const paragraphs = Array.from(document.querySelectorAll("p, li"))
-      .map((node) => node.textContent?.replace(/\s+/g, " ").trim() || "")
-      .filter((text) => text.length > 60)
-      .slice(0, 12)
-      .map((text) => text.slice(0, 500));
-    const headings = Array.from(document.querySelectorAll("h1,h2,h3"))
-      .map((node) => node.textContent?.replace(/\s+/g, " ").trim() || "")
-      .filter(Boolean)
-      .slice(0, 16);
+  return page.evaluate(
+    (input) => {
+      const getMeta = (selector) =>
+        document.querySelector(selector)?.getAttribute("content") || "";
+      const paragraphs = Array.from(document.querySelectorAll("p, li"))
+        .map((node) => node.textContent?.replace(/\s+/g, " ").trim() || "")
+        .filter((text) => text.length > 60)
+        .slice(0, 12)
+        .map((text) => text.slice(0, 500));
+      const headings = Array.from(document.querySelectorAll("h1,h2,h3"))
+        .map((node) => node.textContent?.replace(/\s+/g, " ").trim() || "")
+        .filter(Boolean)
+        .slice(0, 16);
 
-    return {
-      title: document.title || input.topic,
-      link: location.href,
-      snippet: getMeta('meta[name="description"]') || headings[0] || input.topic,
-      source: location.hostname.replace(/^www\./, ""),
-      publishedHint:
-        getMeta('meta[property="article:published_time"]') ||
-        getMeta('meta[name="date"]') ||
-        getMeta('meta[name="pubdate"]') ||
-        null,
-      headings,
-      keyPoints: paragraphs,
-      image: getMeta('meta[property="og:image"]') || getMeta('meta[name="twitter:image"]') || null
-    };
-  }, { topic });
+      const imageCandidates = [];
+      const ogImage = getMeta('meta[property="og:image"]');
+      const twitterImage = getMeta('meta[name="twitter:image"]');
+      if (ogImage) imageCandidates.push(ogImage);
+      if (twitterImage && twitterImage !== ogImage) imageCandidates.push(twitterImage);
+
+      const imageNodes = Array.from(document.images);
+      imageNodes.forEach((node) => {
+        const src = node.currentSrc || node.src || "";
+        if (
+          src &&
+          !src.startsWith("data:") &&
+          /^https?:\/\//i.test(src) &&
+          !imageCandidates.includes(src)
+        ) {
+          imageCandidates.push(src);
+        }
+      });
+
+      const images = imageCandidates.map((url) => {
+        const node = imageNodes.find(
+          (image) => image.currentSrc === url || image.src === url,
+        );
+        return {
+          url,
+          width: node?.naturalWidth || 0,
+          height: node?.naturalHeight || 0,
+        };
+      });
+
+      const bestImage = images.sort(
+        (a, b) => b.width * b.height - a.width * a.height,
+      )[0];
+
+      return {
+        title: document.title || input.topic,
+        link: location.href,
+        snippet:
+          getMeta('meta[name="description"]') || headings[0] || input.topic,
+        source: location.hostname.replace(/^www\./, ""),
+        publishedHint:
+          getMeta('meta[property="article:published_time"]') ||
+          getMeta('meta[name="date"]') ||
+          getMeta('meta[name="pubdate"]') ||
+          null,
+        headings,
+        keyPoints: paragraphs,
+        image:
+          getMeta('meta[property="og:image"]') ||
+          getMeta('meta[name="twitter:image"]') ||
+          bestImage?.url ||
+          null,
+        images,
+      };
+    },
+    { topic },
+  );
 }
 
 function getCuratedSourceUrls(topic) {
@@ -479,24 +1006,64 @@ function getCuratedSourceUrls(topic) {
   const urls = new Set();
 
   const add = (...items) => items.forEach((item) => urls.add(item));
+  const isBroadNewsTopic =
+    /(latest news|breaking news|trending news|us news|news in the us|what('?s| is) happening|top news|current events|headlines)/.test(
+      lower,
+    );
+  const isBroadAiTopic =
+    /(new launch in ai|latest ai|ai update|ai news|new ai|new model|new tool|artificial intelligence update|llm update|ai breakthrough)/.test(
+      lower,
+    );
 
-  add(
-    "https://news.google.com/",
-    "https://www.reuters.com/technology/",
-    "https://apnews.com/hub/technology",
-    "https://techcrunch.com/category/artificial-intelligence/",
-    "https://www.theverge.com/ai-artificial-intelligence",
-    "https://www.zdnet.com/topic/artificial-intelligence/"
-  );
+  if (isBroadNewsTopic) {
+    add(
+      "https://apnews.com/",
+      "https://apnews.com/us-news",
+      "https://www.reuters.com/world/us/",
+      "https://www.reuters.com/world/",
+      "https://www.npr.org/sections/news/",
+      "https://www.usatoday.com/news/",
+      "https://www.cbsnews.com/latest/",
+      "https://abcnews.go.com/US",
+      "https://www.nbcnews.com/us-news",
+      "https://www.politico.com/news/",
+      "https://www.axios.com/",
+    );
+  } else if (isBroadAiTopic) {
+    add(
+      "https://www.reuters.com/technology/",
+      "https://techcrunch.com/category/artificial-intelligence/",
+      "https://www.theverge.com/ai-artificial-intelligence",
+      "https://www.zdnet.com/topic/artificial-intelligence/",
+      "https://openai.com/news/",
+      "https://blog.google/technology/ai/",
+      "https://deepmind.google/discover/blog/",
+      "https://www.anthropic.com/news",
+      "https://blog.google/products/gemini/",
+    );
+  } else {
+    add(
+      "https://news.google.com/",
+      "https://www.reuters.com/technology/",
+      "https://apnews.com/hub/technology",
+      "https://techcrunch.com/category/artificial-intelligence/",
+      "https://www.theverge.com/ai-artificial-intelligence",
+      "https://www.zdnet.com/topic/artificial-intelligence/",
+    );
+  }
 
-  if (/(ai|artificial intelligence|chatgpt|openai|gemini|claude|llm|automation|agent)/.test(lower)) {
+  if (
+    /(ai|artificial intelligence|chatgpt|openai|gemini|claude|llm|automation|agent)/.test(
+      lower,
+    )
+  ) {
     add(
       "https://openai.com/news/",
       "https://blog.google/technology/ai/",
       "https://deepmind.google/discover/blog/",
       "https://www.anthropic.com/news",
       "https://developers.googleblog.com/",
-      "https://blog.google/products/gemini/"
+      "https://blog.google/products/gemini/",
     );
   }
 
@@ -505,7 +1072,7 @@ function getCuratedSourceUrls(topic) {
       "https://developers.google.com/search/blog",
       "https://searchengineland.com/",
       "https://www.searchenginejournal.com/",
-      "https://yoast.com/seo-blog/"
+      "https://yoast.com/seo-blog/",
     );
   }
 
@@ -513,7 +1080,7 @@ function getCuratedSourceUrls(topic) {
     add(
       "https://wordpress.org/news/",
       "https://developer.wordpress.org/news/",
-      "https://woocommerce.com/blog/"
+      "https://woocommerce.com/blog/",
     );
   }
 
@@ -525,14 +1092,35 @@ function isRelevantCuratedSummary(summary, topic) {
     summary.title,
     summary.snippet,
     ...(summary.headings || []),
-    ...(summary.keyPoints || [])
-  ].join(" ").toLowerCase();
+    ...(summary.keyPoints || []),
+  ]
+    .join(" ")
+    .toLowerCase();
 
   const terms = topic
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter((word) => word.length > 2);
 
+  const broadNewsTopic =
+    /(latest news|breaking news|trending news|us news|news in the us|what('?s| is) happening|top news|current events|headlines)/.test(
+      topic.toLowerCase(),
+    );
+  const broadAiTopic =
+    /(new launch in ai|latest ai|ai update|ai news|new ai|new model|new tool|artificial intelligence update|llm update|ai breakthrough)/.test(
+      topic.toLowerCase(),
+    );
+  const trustedNewsSource =
+    /(?:^|\.)apnews\.com$|(?:^|\.)reuters\.com$|(?:^|\.)npr\.org$|(?:^|\.)usatoday\.com$|(?:^|\.)cbsnews\.com$|(?:^|\.)abcnews\.go\.com$|(?:^|\.)nbcnews\.com$|(?:^|\.)politico\.com$|(?:^|\.)axios\.com$/.test(
+      String(summary.source || "").toLowerCase(),
+    );
+  const trustedAiSource =
+    /(?:^|\.)reuters\.com$|(?:^|\.)techcrunch\.com$|(?:^|\.)theverge\.com$|(?:^|\.)zdnet\.com$|(?:^|\.)openai\.com$|(?:^|\.)blog\.google$|(?:^|\.)deepmind\.google$|(?:^|\.)anthropic\.com$|(?:^|\.)developers\.googleblog\.com$/.test(
+      String(summary.source || "").toLowerCase(),
+    );
+
+  if (broadNewsTopic && trustedNewsSource) return true;
+  if (broadAiTopic && trustedAiSource) return true;
   if (!terms.length) return true;
   const matchCount = terms.filter((term) => haystack.includes(term)).length;
   return matchCount >= Math.min(2, terms.length);
@@ -540,29 +1128,185 @@ function isRelevantCuratedSummary(summary, topic) {
 
 async function searchImagesFromResearch(topic, research) {
   const localImages = await localImagesForTopic(topic);
-  const researchImages = research
-    .filter((item) => item.image)
-    .map((item) => ({
-      title: item.title || topic,
-      link: item.image,
-      contextLink: item.link,
-      mime: "image/jpeg",
-      source: item.source
-    }));
+  const usedImages = await readUsedImages();
+  const researchImages = research.flatMap((item) => {
+    const title = item.title || topic;
+    const images = [];
+    if (Array.isArray(item.images) && item.images.length) {
+      item.images.forEach((image) => {
+        if (image?.url && isUsableImageCandidate(image.url, image)) {
+          images.push({
+            title,
+            link: image.url,
+            width: image.width || 0,
+            height: image.height || 0,
+            contextLink: item.link,
+            mime: "image/jpeg",
+            source: item.source,
+          });
+        }
+      });
+    }
+    if (!images.length && item.image && isUsableImageCandidate(item.image)) {
+      images.push({
+        title,
+        link: item.image,
+        width: 0,
+        height: 0,
+        contextLink: item.link,
+        mime: "image/jpeg",
+        source: item.source,
+      });
+    }
+    return images;
+  });
 
-  return [...localImages, ...researchImages].slice(0, Number(process.env.IMAGE_RESULTS_PER_TOPIC || 3));
+  const uniqueImages = dedupeImagesByUrl(researchImages).filter(
+    (image) => !usedImages.has(normalizeImageUrl(image.link)),
+  );
+
+  const rankedImages = rankImageCandidates(topic, uniqueImages);
+
+  return [...rankedImages, ...localImages].slice(
+    0,
+    Number(process.env.IMAGE_RESULTS_PER_TOPIC || 3),
+  );
+}
+
+function isUsableImageCandidate(url, image = {}) {
+  const normalizedUrl = String(url || "").toLowerCase();
+  if (!/^https?:\/\//i.test(normalizedUrl)) return false;
+  if (/\.(svg|ico)(\?|$)/i.test(normalizedUrl)) return false;
+  if (
+    /(logo|icon|sprite|avatar|author|profile|placeholder|default|favicon|apple-touch)/i.test(
+      normalizedUrl,
+    )
+  ) {
+    return false;
+  }
+
+  const area = Number(image.width || 0) * Number(image.height || 0);
+  if (area > 0 && area < Number(process.env.MIN_IMAGE_AREA || 90000)) {
+    return false;
+  }
+
+  return true;
+}
+
+function dedupeImagesByUrl(images) {
+  const seen = new Set();
+  return images.filter((image) => {
+    const key = normalizeImageUrl(image.link);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function rankImageCandidates(topic, images) {
+  const topicWords = String(topic || "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word.length > 2);
+
+  return images.sort((a, b) => {
+    const scoreA = imageCandidateScore(a, topicWords);
+    const scoreB = imageCandidateScore(b, topicWords);
+    return scoreB - scoreA;
+  });
+}
+
+function imageCandidateScore(image, topicWords) {
+  const area = Number(image.width || 0) * Number(image.height || 0);
+  const haystack = [image.title, image.link, image.contextLink, image.source]
+    .join(" ")
+    .toLowerCase();
+  const topicScore = topicWords.filter((word) => haystack.includes(word)).length;
+  const sourcePenalty = /\/(tag|category|author|topics?)\//i.test(
+    image.contextLink || "",
+  )
+    ? 50000
+    : 0;
+  return area + topicScore * 250000 - sourcePenalty;
+}
+
+async function readUsedImages() {
+  try {
+    const json = JSON.parse(await readFile(resolveUsedImagesPath(), "utf8"));
+    return new Set(
+      (Array.isArray(json) ? json : [])
+        .map((item) => normalizeImageUrl(item.originalImageUrl || item.link || item))
+        .filter(Boolean),
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+async function markUsedImages(uploadedImages) {
+  if (!uploadedImages?.length) return;
+
+  const usedPath = resolveUsedImagesPath();
+  let existing = [];
+  try {
+    existing = JSON.parse(await readFile(usedPath, "utf8"));
+  } catch {
+    existing = [];
+  }
+
+  const seen = new Set(
+    existing
+      .map((item) => normalizeImageUrl(item.originalImageUrl || item.link || item))
+      .filter(Boolean),
+  );
+  for (const image of uploadedImages) {
+    const key = normalizeImageUrl(image.originalImageUrl || image.url);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    existing.push({
+      originalImageUrl: image.originalImageUrl || image.url,
+      uploadedUrl: image.url || "",
+      usedAt: new Date().toISOString(),
+      site: selectedSite || "default",
+    });
+  }
+
+  await mkdir(path.dirname(usedPath), { recursive: true });
+  await writeFile(usedPath, JSON.stringify(existing.slice(-200), null, 2));
+}
+
+function resolveUsedImagesPath() {
+  return path.join(root, "state", `used-images.${selectedSite || "default"}.json`);
+}
+
+function normalizeImageUrl(url) {
+  try {
+    const parsed = new URL(String(url || ""));
+    parsed.hash = "";
+    for (const key of [...parsed.searchParams.keys()]) {
+      if (/^(utm_|fbclid|gclid|wbraid|gbraid)/i.test(key)) {
+        parsed.searchParams.delete(key);
+      }
+    }
+    return parsed.toString();
+  } catch {
+    return String(url || "").trim();
+  }
 }
 
 async function localImagesForTopic(topic) {
   const imagesDir = path.join(root, "images");
   try {
     const files = await readdir(imagesDir);
-    const words = topic.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length > 2);
+    const words = topic
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((word) => word.length > 2);
     return files
       .filter((file) => /\.(png|jpe?g|webp|gif)$/i.test(file))
       .map((file) => ({
         file,
-        score: words.filter((word) => file.toLowerCase().includes(word)).length
+        score: words.filter((word) => file.toLowerCase().includes(word)).length,
       }))
       .sort((a, b) => b.score - a.score)
       .slice(0, Number(process.env.IMAGE_RESULTS_PER_TOPIC || 3))
@@ -571,93 +1315,773 @@ async function localImagesForTopic(topic) {
         link: path.join(imagesDir, file),
         contextLink: "",
         mime: mimeFromFilename(file),
-        source: "local"
+        source: "local",
       }));
   } catch {
     return [];
   }
 }
 
-async function generateArticle(topic, research) {
+async function generateArticle(topic, research, context = {}) {
   const provider = (process.env.AI_PROVIDER || "gemini").toLowerCase();
-  const instructions = "Return only valid JSON matching the requested schema.";
-  const prompt = await renderPromptTemplate("article-writer.md", {
+  const minWords = Number(process.env.MIN_ARTICLE_WORDS || 600);
+  const schema = JSON.stringify(
+    {
+      title: "SEO title under 65 characters",
+      slug: "url-slug",
+      metaDescription: "150-160 character meta description",
+      focusKeyword: "main keyword",
+      secondaryKeywords: ["keyword 1", "keyword 2", "keyword 3"],
+      articleHtml:
+        "<h1>Main title</h1><p>Full article HTML with one h1, then h3/h4/h5 sections, detailed explanations, FAQ, and table of contents.</p>",
+      imagePrompts: ["image idea 1", "image idea 2", "image idea 3"],
+    },
+    null,
+    2,
+  );
+
+  const attempts = Number(process.env.ARTICLE_GENERATION_ATTEMPTS || 2);
+  let lastError = null;
+  let lastArticle = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    console.log(`Article generation attempt ${attempt}/${attempts}...`);
+    const prompt = JSON.stringify(
+      await buildArticlePromptPayload({
+        topic,
+        research,
+        schema,
+        context,
+        attempt,
+        previousValidationError: lastError,
+        minWords,
+      }),
+      null,
+      2,
+    );
+    const instructions =
+      attempt === 1
+        ? "The input is a JSON brief. Follow every field in that brief exactly and return only valid JSON matching output_schema."
+        : "The input is a JSON brief. Fix the previous failure completely, especially previous_validation_error, and return only valid JSON matching output_schema.";
+
+    let raw;
+    if (provider === "openai") {
+      raw = await callOpenAI({ instructions, prompt });
+    } else {
+      try {
+        raw = await callGemini({ instructions, prompt });
+      } catch (error) {
+        if (process.env.OPENAI_API_KEY) {
+          console.warn(
+            `Gemini failed; falling back to OpenAI: ${error.message}`,
+          );
+          raw = await callOpenAI({ instructions, prompt });
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    const article = normalizeArticleStructure(parseJsonObject(raw), topic, research);
+    lastArticle = article;
+    const validationError = validateArticleStructure(article.articleHtml);
+    if (!validationError) {
+      return maybeCopyEditArticle(article, topic, research, context);
+    }
+    if (isWordCountValidationError(validationError)) {
+      const expanded = await expandShortArticle(
+        article,
+        topic,
+        research,
+        context,
+        provider,
+        schema,
+        validationError,
+      );
+      lastArticle = expanded;
+      const expandedValidationError = validateArticleStructure(expanded.articleHtml);
+      if (!expandedValidationError) {
+        return maybeCopyEditArticle(expanded, topic, research, context);
+      }
+      lastError = expandedValidationError;
+      console.warn(
+        `Expanded article still failed validation on attempt ${attempt}: ${expandedValidationError}`,
+      );
+      continue;
+    }
+    lastError = validationError;
+    console.warn(
+      `Article validation failed on attempt ${attempt}: ${validationError}`,
+    );
+  }
+
+  if (lastArticle && isWordCountValidationError(lastError)) {
+    const expanded = await expandShortArticle(
+      lastArticle,
+      topic,
+      research,
+      context,
+      provider,
+      schema,
+      lastError,
+    );
+    const expandedValidationError = validateArticleStructure(expanded.articleHtml);
+    if (!expandedValidationError) {
+      return maybeCopyEditArticle(expanded, topic, research, context);
+    }
+    lastError = expandedValidationError;
+  }
+
+  throw new Error(
+    `Generated article did not meet publishing rules: ${lastError}`,
+  );
+}
+
+async function buildArticlePromptPayload({
+  topic,
+  research,
+  schema,
+  context,
+  attempt,
+  previousValidationError,
+  minWords,
+}) {
+  const promptTemplate = await renderPromptTemplate(resolvePromptTemplate(), {
     TOPIC: topic,
     RESEARCH_RESULTS: JSON.stringify(research, null, 2),
-    ARTICLE_SCHEMA: JSON.stringify(
-      {
-        title: "SEO title under 65 characters",
-        slug: "url-slug",
-        metaDescription: "150-160 character meta description",
-        focusKeyword: "main keyword",
-        secondaryKeywords: ["keyword 1", "keyword 2", "keyword 3"],
-        articleHtml: "<p>Full article HTML with h2/h3 sections, bullet lists, source links, and FAQs.</p>",
-        imagePrompts: ["image idea 1", "image idea 2", "image idea 3"]
-      },
-      null,
-      2
-    )
+    ARTICLE_SCHEMA: schema,
+    SITE_CONTEXT: context.siteContext || "No site context provided.",
+    INTERNAL_LINKS: formatInternalLinksForPrompt(context.internalLinks || []),
   });
+  const searchStrategy = buildModernSearchStrategy(topic);
+  const semanticSeoStrategy = buildSemanticSeoStrategy(topic, research);
 
-  const raw = provider === "openai"
-    ? await callOpenAI({ instructions, prompt })
-    : await callGemini({ instructions, prompt });
+  return {
+    task: "Write a WordPress-ready article and return only valid JSON.",
+    attempt,
+    topic,
+    content_mode: (process.env.CONTENT_MODE || "").trim().toLowerCase() || null,
+    audience: selectedSite.toLowerCase().includes("kafirana")
+      ? "US news audience"
+      : "general audience",
+    site: selectedSite || "default",
+    site_context: context.siteContext || "No site context provided.",
+    approved_internal_links: context.internalLinks || [],
+    research_results: research || [],
+    modern_search_strategy: searchStrategy,
+    semantic_seo_strategy: semanticSeoStrategy,
+    output_schema: JSON.parse(schema),
+    output_requirements: {
+      return_only_json: true,
+      no_markdown_fence: true,
+      no_extra_intro_or_outro: true,
+      fields_required: [
+        "title",
+        "slug",
+        "metaDescription",
+        "focusKeyword",
+        "secondaryKeywords",
+        "articleHtml",
+        "imagePrompts",
+      ],
+    },
+    editorial_rules: [
+      "Use only the provided research snippets and links.",
+      "Do not invent quotes, dates, figures, rankings, or unsupported claims.",
+      "Lead with the most important update first.",
+      "Put the direct answer or key update in the first 2 paragraphs.",
+      "Write for the full modern search journey: curiosity, validation, comparison, and confirmation.",
+      "Write semantically around the full topic, not by repeating one exact keyword.",
+      "Use the provided research to infer a competitor-style outline, then improve it with clearer structure, better examples, and stronger next-step value.",
+      "Use clear US English and concise paragraphs.",
+      "Add context, why it matters, who is affected, and what to watch next.",
+      "Prefer a specific, entity-led title over generic news phrasing.",
+      "Make the article meaningfully better than a source summary.",
+    ],
+    seo_requirements: {
+      min_words_after_stripping_html: minWords,
+      target_words_after_stripping_html: Math.max(minWords + 150, 750),
+      max_words_after_stripping_html: Number(process.env.MAX_ARTICLE_WORDS || 2500),
+      must_include_table_of_contents: true,
+      must_include_faq: true,
+      must_include_external_links: true,
+      must_include_approved_internal_links: true,
+      preferred_internal_link_count: "2-4",
+      focus_keyword_rules: [
+        "Include focus keyword in title.",
+        "Include focus keyword in meta description.",
+        "Include focus keyword in slug.",
+        "Use focus keyword near the beginning of the article where natural.",
+        "Use focus keyword naturally in some subheadings.",
+        "Prefer decision-intent focus keywords when supported by the topic, such as review, best, alternatives, vs, pricing, worth it, cost, for a specific use case, or a branded decision query.",
+        "Do not target artificial keyword density. Use semantic variants, entities, questions, and related subtopics naturally.",
+      ],
+      title_rules: [
+        "Keep title highly clickable and accurate.",
+        "Avoid generic prefixes such as US News Today, Latest News, Breaking News, or Trending News.",
+        "Do not append generic trailing labels such as US News Update, US News Shift, Latest News, Top Headlines and Updates, or similar filler.",
+        "Do not reuse bland patterns like Top Headlines and Updates.",
+        "Prefer a specific person, company, event, place, consequence, or decision in the title.",
+      ],
+      aeo_rules: [
+        "Answer-first formatting.",
+        "Scannable sections and concise lists.",
+        "Add quick facts, key takeaways, or quick answer near the top.",
+        "For decision topics, add a quick verdict or bottom line near the top.",
+        "Use question-style FAQ headings.",
+      ],
+      topical_authority_rules: [
+        "Group similar keyword variants into one article angle rather than duplicating the same intent.",
+        "Cover adjacent subtopics that belong on this page so it can rank for multiple related queries.",
+        "Use internal links to connect this page to related topical-cluster pages when approved links are available.",
+        "Include practical on-page elements: descriptive headings, image alt intent, crawlable external links, internal links, and FAQ.",
+      ],
+    },
+    html_rules: {
+      exactly_one_h1: true,
+      allowed_heading_tags_after_h1: ["h3", "h4", "h5"],
+      disallow_h2: true,
+      keep_headings_reasonably_short: true,
+    },
+    validation: {
+      previous_validation_error: previousValidationError || null,
+      self_check_before_return: [
+        `Ensure articleHtml contains at least ${Math.max(minWords + 150, 750)} words after stripping HTML tags.`,
+        "If too short, add more concrete context, analysis, FAQ answers, and what-to-watch-next sections before returning.",
+      ],
+      instruction:
+        previousValidationError
+          ? "Your previous output failed validation. Fix that exact issue completely in this attempt."
+          : "Pass validation on the first attempt.",
+    },
+    image_requirements: {
+      image_prompt_count: 3,
+      image_alt_should_use_focus_keyword: true,
+    },
+    reference_prompt: promptTemplate,
+  };
+}
 
-  return parseJsonObject(raw);
+function buildModernSearchStrategy(topic) {
+  const topicText = String(topic || "").trim();
+  const contentMode = (process.env.CONTENT_MODE || "").trim().toLowerCase();
+  const isNewsMode =
+    contentMode === "news" ||
+    selectedSite.toLowerCase().includes("kafirana") ||
+    /\b(news|update|launch|announced|released|policy|law|market|stock|election|court|weather|sports)\b/i.test(
+      topicText,
+    );
+  const isDecisionTopic =
+    /\b(best|review|vs|versus|alternative|alternatives|pricing|price|cost|worth it|compare|comparison|tool|tools|software|app|phone|car|bike|ev|download|buy|deal|offer|service|platform|plugin|course)\b/i.test(
+      topicText,
+    );
+
+  const journey = [
+    "Curiosity: answer the broad question quickly so readers know they are in the right place.",
+    "Validation: include source-backed facts, limits, risks, and signs of trust.",
+    "Comparison: help readers compare options, alternatives, tradeoffs, or scenarios where relevant.",
+    "Confirmation: close with a practical next step, bottom line, or what to watch next.",
+  ];
+
+  if (isDecisionTopic && !isNewsMode) {
+    return {
+      mode: "decision",
+      summary:
+        "Prioritize high-intent decision keywords and help the reader make or narrow a choice.",
+      journey,
+      prefer_keywords: [
+        `${topicText} review`,
+        `${topicText} alternatives`,
+        `${topicText} vs competitors`,
+        `${topicText} pricing`,
+        `is ${topicText} worth it`,
+        `best ${topicText} for specific use cases`,
+      ],
+      recommended_sections: [
+        "Quick verdict",
+        "Who this is best for",
+        "Key features or benefits",
+        "Pros and cons",
+        "Alternatives or comparisons",
+        "Pricing, cost, availability, or requirements",
+        "Risks, limitations, or what to check first",
+        "Is it worth it?",
+        "FAQ",
+      ],
+      avoid: [
+        "Do not make the article mostly a definition.",
+        "Do not chase broad low-intent informational traffic if the topic can support decision intent.",
+      ],
+    };
+  }
+
+  if (isNewsMode) {
+    return {
+      mode: "news-validation",
+      summary:
+        "Treat the article as validation-focused search content: readers want to know what changed, whether it matters, and what comes next.",
+      journey,
+      prefer_keywords: [
+        `${topicText} update`,
+        `${topicText} latest`,
+        `${topicText} explained`,
+        `${topicText} impact`,
+        `${topicText} what changed`,
+      ],
+      recommended_sections: [
+        "Quick facts or key takeaways",
+        "What changed",
+        "Why it matters",
+        "Who is affected",
+        "Key details",
+        "Risks, uncertainty, or limits",
+        "What to watch next",
+        "FAQ",
+      ],
+      avoid: [
+        "Do not pad the article with dictionary-style background.",
+        "Do not force product-review sections unless the topic is a product, tool, platform, or launch.",
+      ],
+    };
+  }
+
+  return {
+    mode: "hybrid",
+    summary:
+      "Blend answer-first education with decision-helping sections so the article can satisfy Google, AI summaries, and readers comparing options.",
+    journey,
+    prefer_keywords: [
+      `${topicText} guide`,
+      `${topicText} examples`,
+      `${topicText} checklist`,
+      `${topicText} best practices`,
+      `${topicText} FAQ`,
+    ],
+    recommended_sections: [
+      "Quick answer",
+      "What it means",
+      "When it matters",
+      "Examples or use cases",
+      "Steps or checklist",
+      "Mistakes, risks, or limitations",
+      "What to do next",
+      "FAQ",
+    ],
+    avoid: [
+      "Do not write a thin overview.",
+      "Do not rely on generic definitions when examples, comparisons, or next steps would be more useful.",
+    ],
+  };
+}
+
+function buildSemanticSeoStrategy(topic, research = []) {
+  const topicText = String(topic || "").trim();
+  const terms = extractSemanticTerms(topicText, research);
+  const questionSeeds = buildQuestionSeeds(topicText);
+  const clusterAngles = buildClusterAngles(topicText);
+
+  return {
+    summary:
+      "Use topical mapping and semantic content writing: cover the topic deeply enough for related queries without keyword stuffing or duplicate intent.",
+    topical_mapping: {
+      primary_topic: topicText,
+      cluster_angles: clusterAngles,
+      related_terms_to_consider: terms,
+      question_queries_to_answer: questionSeeds,
+    },
+    writing_rules: [
+      "Write on the topic rather than repeating the exact focus keyword.",
+      "Make each major section answer a distinct sub-intent.",
+      "Use related entities, modifiers, problems, use cases, risks, comparisons, and FAQs naturally.",
+      "Avoid cannibalization by keeping this article focused on one clear page intent.",
+      "Avoid duplicate paragraphs that say the same thing with different keywords.",
+      "Make the content skimmable with short paragraphs, descriptive headings, lists, and tables when useful.",
+    ],
+    on_page_rules: [
+      "Include the focus keyword in the title, slug, meta description, opening, at least one heading, and image alt text where natural.",
+      "Include at least one relevant internal link when approved links exist.",
+      "Include at least one crawlable external source link.",
+      "Use FAQ questions that reflect real user searches.",
+      "Keep headings concise and meaningful; do not use headings as keyword stuffing.",
+    ],
+  };
+}
+
+function extractSemanticTerms(topic, research = []) {
+  const stopWords = new Set([
+    "about",
+    "after",
+    "also",
+    "and",
+    "are",
+    "best",
+    "but",
+    "can",
+    "for",
+    "from",
+    "has",
+    "how",
+    "into",
+    "latest",
+    "more",
+    "new",
+    "news",
+    "not",
+    "now",
+    "the",
+    "this",
+    "to",
+    "top",
+    "update",
+    "what",
+    "when",
+    "where",
+    "why",
+    "with",
+    "you",
+    "your",
+  ]);
+  const text = [
+    topic,
+    ...research.flatMap((item) => [
+      item.title,
+      item.snippet,
+      item.description,
+      item.source,
+    ]),
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const counts = new Map();
+  for (const match of text.matchAll(/[a-zA-Z][a-zA-Z0-9+-]{2,}/g)) {
+    const term = match[0].toLowerCase();
+    if (stopWords.has(term)) continue;
+    counts.set(term, (counts.get(term) || 0) + 1);
+  }
+
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, 18)
+    .map(([term]) => term);
+}
+
+function buildQuestionSeeds(topic) {
+  const cleanTopic = String(topic || "").trim();
+  return [
+    `What is the bottom line on ${cleanTopic}?`,
+    `Who is ${cleanTopic} best for or most relevant to?`,
+    `What are the main benefits and risks of ${cleanTopic}?`,
+    `How does ${cleanTopic} compare with alternatives?`,
+    `What should readers check before deciding on ${cleanTopic}?`,
+  ];
+}
+
+function buildClusterAngles(topic) {
+  const cleanTopic = String(topic || "").trim();
+  return [
+    `${cleanTopic} overview`,
+    `${cleanTopic} benefits`,
+    `${cleanTopic} risks or limitations`,
+    `${cleanTopic} alternatives or comparisons`,
+    `${cleanTopic} practical next steps`,
+  ];
+}
+
+async function maybeCopyEditArticle(article, topic, research, context = {}) {
+  if (!getBooleanEnv("ARTICLE_COPY_EDIT_PASS", false)) return article;
+
+  const provider = (process.env.AI_PROVIDER || "gemini").toLowerCase();
+  const prompt = [
+    "Copy edit this generated WordPress article for clarity, usefulness, trust, and SEO.",
+    "Preserve all facts. Do not add unsupported claims, quotes, figures, dates, or named entities.",
+    "Improve the title, meta description, opening clarity, section usefulness, FAQ answers, and internal-link fit where needed.",
+    "Preserve the modern search strategy: answer early, add validation, support comparison where relevant, and keep decision-helping sections such as quick verdict, pros and cons, alternatives, pricing, or what to watch next when they fit the topic.",
+    "Preserve semantic SEO quality: cover the full topic, remove duplicate intent, add natural related terms where useful, and avoid exact-match keyword stuffing.",
+    "Keep exactly one h1. Do not use h2 tags. Keep the article between 600 and 2500 words.",
+    "Return only valid JSON with the same keys as the original article object.",
+    "",
+    `Topic: ${topic}`,
+    "",
+    "Site context:",
+    context.siteContext || "No site context provided.",
+    "",
+    "Approved internal links:",
+    formatInternalLinksForPrompt(context.internalLinks || []),
+    "",
+    "Research:",
+    JSON.stringify(research, null, 2),
+    "",
+    "Article JSON:",
+    JSON.stringify(article, null, 2),
+  ].join("\n");
+
+  try {
+    const raw =
+      provider === "openai"
+        ? await callOpenAI({
+            instructions: "Return only valid JSON matching the article schema.",
+            prompt,
+          })
+        : await callGemini({
+            instructions: "Return only valid JSON matching the article schema.",
+            prompt,
+          });
+    const reviewed = normalizeArticleStructure(parseJsonObject(raw), topic, research);
+    const validationError = validateArticleStructure(reviewed.articleHtml);
+    if (validationError) {
+      console.warn(`Copy-edit pass skipped: ${validationError}`);
+      return article;
+    }
+    console.log("Copy-edit pass applied.");
+    return reviewed;
+  } catch (error) {
+    console.warn(`Copy-edit pass skipped: ${error.message}`);
+    return article;
+  }
+}
+
+function isWordCountValidationError(error) {
+  return /expected at least \d+ words, got \d+/i.test(String(error || ""));
+}
+
+async function expandShortArticle(
+  article,
+  topic,
+  research,
+  context,
+  provider,
+  schema,
+  validationError,
+) {
+  console.log("Starting short-article expansion pass...");
+  const prompt = JSON.stringify(
+    {
+      task: "Expand the existing article so it passes the minimum word-count requirement while preserving facts and structure.",
+      topic,
+      site: selectedSite || "default",
+      site_context: context.siteContext || "No site context provided.",
+      approved_internal_links: context.internalLinks || [],
+      research_results: research || [],
+      previous_validation_error: validationError,
+      output_schema: JSON.parse(schema),
+      requirements: {
+        return_only_json: true,
+        keep_existing_facts_only: true,
+        preserve_title_slug_meta_when_still_valid: true,
+        min_words_after_stripping_html: Number(process.env.MIN_ARTICLE_WORDS || 600),
+        target_words_after_stripping_html: Math.max(
+          Number(process.env.MIN_ARTICLE_WORDS || 600) + 150,
+          750,
+        ),
+        max_words_after_stripping_html: Number(process.env.MAX_ARTICLE_WORDS || 2500),
+        exactly_one_h1: true,
+        disallow_h2: true,
+        allowed_heading_tags_after_h1: ["h3", "h4", "h5"],
+        must_expand_with: [
+          "more concrete context",
+          "why it matters",
+          "who is affected",
+          "what to watch next",
+          "FAQ answers",
+          "quick facts or key takeaways",
+        ],
+      },
+      article_json: article,
+    },
+    null,
+    2,
+  );
+
+  const instructions =
+    "Expand the article substantially. Fix the word-count failure completely. Do not stop near the minimum; exceed it comfortably. Return only valid JSON matching output_schema.";
+
+  let raw;
+  if (provider === "openai") {
+    raw = await callOpenAI({ instructions, prompt });
+  } else {
+    try {
+      raw = await callGemini({ instructions, prompt });
+    } catch (error) {
+      if (process.env.OPENAI_API_KEY) {
+        console.warn(`Gemini expansion failed; falling back to OpenAI: ${error.message}`);
+        raw = await callOpenAI({ instructions, prompt });
+      } else {
+        throw error;
+      }
+    }
+  }
+
+  console.log("Applied short-article expansion pass.");
+  return normalizeArticleStructure(parseJsonObject(raw), topic, research);
+}
+
+function formatInternalLinksForPrompt(internalLinks) {
+  if (!internalLinks.length) return "No approved internal links provided.";
+  return internalLinks
+    .map((link) => `- ${link.anchor}: ${link.url}`)
+    .join("\n");
+}
+
+function resolvePromptTemplate() {
+  const explicitPrompt = (
+    process.env.PROMPT_FILE || getArgValue("--prompt")
+  ).trim();
+  if (explicitPrompt) return explicitPrompt;
+
+  const contentMode = (process.env.CONTENT_MODE || "").trim().toLowerCase();
+  if (contentMode === "news") return "news-article-writer.md";
+
+  const siteName = selectedSite.toLowerCase();
+  if (siteName.includes("kafirana") || siteName.includes("news")) {
+    return "news-article-writer.md";
+  }
+
+  return "article-writer.md";
 }
 
 async function callGemini({ instructions, prompt }) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("Missing GEMINI_API_KEY in wordpress-auto-publisher/.env.");
-
+  const apiKeys = getApiKeyPool("GEMINI_API_KEYS", "GEMINI_API_KEY");
+  if (!apiKeys.length) {
+    throw new Error(
+      "Missing GEMINI_API_KEY or GEMINI_API_KEYS in wordpress-auto-publisher/.env.",
+    );
+  }
   const models = getModelPool(
     process.env.GEMINI_MODEL,
     process.env.GEMINI_MODEL_POOL,
-    "gemini-2.5-flash,gemma-3-1b-it,gemma-3-4b-it,gemma-3-12b-it,gemma-3-27b-it,gemma-4-26b-a4b-it,gemma-4-31b-it"
+    "gemini-2.5-flash,gemini-2.0-flash",
   );
+  const baseUrl = (
+    process.env.GEMINI_API_URL ||
+    "https://generativelanguage.googleapis.com/v1beta/models"
+  ).replace(/\/+$/, "");
+  const endpoint = ":generateContent";
   const errors = [];
 
-  for (const model of models) {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": apiKey
-        },
-        body: JSON.stringify({
-          system_instruction: { parts: [{ text: instructions }] },
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.55,
-            response_mime_type: "application/json"
-          }
-        })
+  for (const [keyIndex, apiKey] of apiKeys.entries()) {
+    let keyFailure = false;
+    console.log(`Trying Gemini key #${keyIndex + 1}...`);
+
+    for (const model of models) {
+      console.log(`Trying Gemini model: ${model}`);
+      const url = `${baseUrl}/${model}${endpoint}`;
+      let text;
+      let json;
+      let response;
+
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(
+          () => controller.abort(),
+          Number(process.env.GEMINI_TIMEOUT_MS || 120000),
+        );
+        response = await fetch(url, {
+          method: "POST",
+          signal: controller.signal,
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": apiKey,
+          },
+          body: JSON.stringify({
+            system_instruction: { parts: [{ text: instructions }] },
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature: 0.55,
+              responseMimeType: "application/json",
+              responseSchema: articleResponseSchema(),
+            },
+          }),
+        });
+        clearTimeout(timeout);
+        text = await response.text();
+        try {
+          json = JSON.parse(text);
+        } catch {
+          const detail = text.trim() || `${response.status} ${response.statusText}`;
+          throw new Error(
+            `Gemini response was not valid JSON for ${url}: ${detail.slice(0, 400)}`,
+          );
+        }
+      } catch (error) {
+        errors.push(
+          `key#${keyIndex + 1} ${model}${endpoint}: ${formatNetworkError(error)}`,
+        );
+        continue;
       }
-    );
-    const json = await response.json();
-    if (response.ok) {
-      console.log(`AI model selected: ${model}`);
-      return extractGeminiText(json);
+
+      if (response.ok) {
+        console.log(`AI model selected: ${model}${endpoint} via key #${keyIndex + 1}`);
+        return extractGeminiText(json);
+      }
+
+      const message =
+        json?.error?.message || response.statusText || text.slice(0, 200);
+      errors.push(`key#${keyIndex + 1} ${model}${endpoint}: ${response.status} ${message}`);
+
+      if ([401, 403, 429].includes(response.status)) {
+        keyFailure = true;
+        break;
+      }
     }
 
-    errors.push(`${model}: ${json.error?.message || response.statusText}`);
-    if ([401, 403].includes(response.status)) break;
+    if (keyFailure) continue;
   }
 
-  throw new Error(`Gemini failed after trying ${models.length} model(s):\n${errors.join("\n")}`);
+  throw new Error(
+    `Gemini failed after trying ${apiKeys.length} key(s) and ${models.length} model(s):\n${errors.join("\n")}`,
+  );
+}
+
+function articleResponseSchema() {
+  return {
+    type: "OBJECT",
+    properties: {
+      title: { type: "STRING" },
+      slug: { type: "STRING" },
+      metaDescription: { type: "STRING" },
+      focusKeyword: { type: "STRING" },
+      secondaryKeywords: {
+        type: "ARRAY",
+        items: { type: "STRING" },
+      },
+      articleHtml: { type: "STRING" },
+      imagePrompts: {
+        type: "ARRAY",
+        items: { type: "STRING" },
+      },
+    },
+    required: [
+      "title",
+      "slug",
+      "metaDescription",
+      "focusKeyword",
+      "secondaryKeywords",
+      "articleHtml",
+      "imagePrompts",
+    ],
+    propertyOrdering: [
+      "title",
+      "slug",
+      "metaDescription",
+      "focusKeyword",
+      "secondaryKeywords",
+      "articleHtml",
+      "imagePrompts",
+    ],
+  };
 }
 
 async function callOpenAI({ instructions, prompt }) {
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error("Missing OPENAI_API_KEY in wordpress-auto-publisher/.env.");
+  if (!apiKey)
+    throw new Error("Missing OPENAI_API_KEY in wordpress-auto-publisher/.env.");
 
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({
       model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
@@ -666,13 +2090,20 @@ async function callOpenAI({ instructions, prompt }) {
       temperature: 0.55,
       text: {
         format: {
-          type: "json_object"
-        }
-      }
-    })
+          type: "json_object",
+        },
+      },
+    }),
   });
 
-  const json = await response.json();
+  const text = await response.text();
+  let json;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    throw new Error(`OpenAI returned non-JSON response: ${text.slice(0, 400)}`);
+  }
+
   if (!response.ok) {
     throw new Error(`OpenAI failed: ${JSON.stringify(json, null, 2)}`);
   }
@@ -696,7 +2127,13 @@ function extractOpenAIText(json) {
 }
 
 function parseJsonObject(raw) {
-  const cleaned = raw.trim().replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```$/i, "").trim();
+  const cleaned = raw
+    .trim()
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/```$/i, "")
+    .trim();
+
   const objectText = extractObjectText(cleaned);
   const attempts = [cleaned];
   if (objectText && objectText !== cleaned) attempts.push(objectText);
@@ -712,7 +2149,9 @@ function parseJsonObject(raw) {
   const repaired = repairArticleJson(objectText || cleaned);
   if (repaired) return repaired;
 
-  throw new Error(`AI did not return valid JSON. First 500 chars:\n${cleaned.slice(0, 500)}`);
+  throw new Error(
+    `AI did not return valid JSON. First 500 chars:\n${cleaned.slice(0, 500)}`,
+  );
 }
 
 function extractObjectText(value) {
@@ -781,30 +2220,392 @@ function extractJsonStringField(value, fieldName) {
   return result;
 }
 
+function normalizeArticleStructure(article, topic, research = []) {
+  const normalized = { ...article };
+  normalized.title = sanitizeGeneratedTitle(
+    normalized.title || topic,
+    topic,
+    research,
+  );
+  normalized.slug = sanitizeGeneratedSlug(normalized.slug || normalized.title || topic);
+  normalized.focusKeyword = sanitizeFocusKeyword(
+    normalized.focusKeyword,
+    normalized.title,
+    topic,
+  );
+  const fallbackTitle =
+    normalized.title || sanitizeGeneratedTitle(topic, topic, research);
+  let html = String(normalized.articleHtml || "").trim();
+
+  html = html.replace(/<h2(\b[^>]*)>/gi, "<h3$1>");
+  html = html.replace(/<\/h2>/gi, "</h3>");
+  html = html.replace(/<h6(\b[^>]*)>/gi, "<h5$1>");
+  html = html.replace(/<\/h6>/gi, "</h5>");
+
+  let seenH1 = false;
+  html = html.replace(
+    /<h1(\b[^>]*)>([\s\S]*?)<\/h1>/gi,
+    (_match, attrs, content) => {
+      if (!seenH1) {
+        seenH1 = true;
+        return `<h1${attrs}>${sanitizeGeneratedTitle(
+          stripHtml(content),
+          topic,
+          research,
+        )}</h1>`;
+      }
+      return `<h3${attrs}>${content}</h3>`;
+    },
+  );
+
+  if (!seenH1) {
+    html = `<h1>${escapeHtml(fallbackTitle)}</h1>\n\n${html}`;
+  }
+
+  normalized.articleHtml = html;
+  return normalized;
+}
+
+function sanitizeFocusKeyword(focusKeyword, title, topic) {
+  const cleaned = String(focusKeyword || "").trim().toLowerCase();
+  const generic = new Set([
+    "us news today",
+    "us trending news",
+    "us news update",
+    "latest news",
+    "trending news",
+    "us news",
+  ]);
+  if (cleaned && !generic.has(cleaned)) {
+    return focusKeyword;
+  }
+
+  const source = sanitizeGeneratedTitle(title || topic);
+  const words = source
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word.length > 2)
+    .slice(0, 5);
+  return words.join(" ") || cleaned || String(topic || "").trim().toLowerCase();
+}
+
+function sanitizeGeneratedTitle(title, topic = "", research = []) {
+  let cleaned = String(title || "").trim();
+  for (let index = 0; index < 3; index += 1) {
+    const next = cleaned.replace(genericTitlePrefixPattern(), "").trim();
+    if (next === cleaned) break;
+    cleaned = next;
+  }
+  cleaned = stripGenericTitleSuffix(cleaned);
+  if (!cleaned) {
+    cleaned = String(title || "").trim();
+  }
+  if (isGenericGeneratedTitle(cleaned)) {
+    const researchTitle = selectSpecificResearchTitle(research, topic);
+    if (researchTitle) {
+      return researchTitle;
+    }
+  }
+  return cleaned;
+}
+
+function stripGenericTitleSuffix(title) {
+  let cleaned = String(title || "").trim();
+  const suffixPatterns = [
+    /\s*[:\-–—|]\s*(us news update|us news shift|latest news|top headlines(?: and updates)?|news update|breaking news|trending news)\s*$/i,
+    /\s*\b(us news update|us news shift|latest news|top headlines(?: and updates)?|news update|breaking news|trending news)\s*$/i,
+  ];
+  for (const pattern of suffixPatterns) {
+    cleaned = cleaned.replace(pattern, "").trim();
+  }
+  return cleaned;
+}
+
+function isGenericGeneratedTitle(title) {
+  const cleaned = String(title || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+  if (!cleaned) return true;
+  if (genericTitlePrefixPattern().test(cleaned)) return true;
+  return (
+    /^(in|across|from) the us[:\-\s]+top headlines and updates$/.test(cleaned) ||
+    /^(in us|in the us)[:\-\s]+top headlines and updates$/.test(cleaned) ||
+    /top headlines and updates$/.test(cleaned) ||
+    /latest (news|updates)( in| across)? the us$/.test(cleaned) ||
+    /trending news( in| across)? us$/.test(cleaned)
+  );
+}
+
+function selectSpecificResearchTitle(research, topic) {
+  const genericTopicTerms = new Set(
+    String(topic || "")
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((word) => word.length > 2),
+  );
+
+  for (const item of research || []) {
+    const candidate = String(item?.title || "").trim();
+    if (!candidate || isGenericGeneratedTitle(candidate)) continue;
+    const normalized = sanitizeGeneratedTitle(candidate);
+    const words = normalized
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((word) => word.length > 2);
+    const uniqueWords = words.filter((word) => !genericTopicTerms.has(word));
+    if (uniqueWords.length >= 2) {
+      return normalized;
+    }
+  }
+
+  return "";
+}
+
+function sanitizeGeneratedSlug(slug) {
+  let cleaned = slugify(slug || "");
+  const prefixes = [
+    "us-news-today",
+    "us-trending-news",
+    "us-news-update",
+    "breaking-news",
+    "latest-news",
+    "trending-news",
+  ];
+
+  for (const prefix of prefixes) {
+    if (cleaned === prefix) return "";
+    if (cleaned.startsWith(`${prefix}-`)) {
+      cleaned = cleaned.slice(prefix.length + 1);
+      break;
+    }
+  }
+
+  return cleaned;
+}
+
+function validateArticleStructure(articleHtml) {
+  const text = stripHtml(articleHtml);
+  const wordCount = countWords(text);
+  const minWords = Number(process.env.MIN_ARTICLE_WORDS || 600);
+  const maxWords = Number(process.env.MAX_ARTICLE_WORDS || 2500);
+  const minWordGrace = Number(process.env.MIN_ARTICLE_WORDS_GRACE || 25);
+  const h1Count = (articleHtml.match(/<h1\b/gi) || []).length;
+  const h2Count = (articleHtml.match(/<h2\b/gi) || []).length;
+
+  if (h1Count !== 1) return `expected exactly 1 h1, got ${h1Count}`;
+  if (h2Count !== 0) return `expected 0 h2 tags, got ${h2Count}`;
+  if (wordCount < Math.max(0, minWords - minWordGrace))
+    return `expected at least ${minWords} words, got ${wordCount}`;
+  if (wordCount > maxWords)
+    return `expected at most ${maxWords} words, got ${wordCount}`;
+
+  const sections = splitSectionsByHeading(articleHtml);
+  for (const section of sections) {
+    const headingText = stripHtml(section.heading).replace(/\s+/g, " ").trim();
+    if (/^h[3-5]$/i.test(section.tag)) {
+      if (isUtilityHeading(headingText)) {
+        continue;
+      }
+      if (headingText.length > 95) {
+        return `heading too long: "${headingText.slice(0, 95)}"`;
+      }
+    }
+  }
+
+  return null;
+}
+
+function runSeoQualityGate({
+  article,
+  html,
+  research,
+  images,
+  internalLinks,
+  slug,
+}) {
+  const issues = getSeoQualityIssues({
+    article,
+    html,
+    research,
+    images,
+    internalLinks,
+    slug,
+  });
+  if (!issues.length) {
+    console.log("SEO quality gate passed.");
+    return;
+  }
+
+  const message = [
+    "SEO quality gate found issues:",
+    ...issues.map((issue) => `- ${issue}`),
+  ].join("\n");
+
+  if (getBooleanEnv("SEO_GATE_STRICT", false)) {
+    throw new Error(message);
+  }
+
+  console.warn(message);
+}
+
+function getSeoQualityIssues({
+  article,
+  html,
+  research,
+  images,
+  internalLinks,
+  slug,
+}) {
+  const issues = [];
+  const text = stripHtml(html);
+  const focusKeyword = String(article.focusKeyword || "").trim();
+  const title = String(article.title || "");
+  const metaDescription = String(article.metaDescription || "");
+  const lowerHtml = String(html || "").toLowerCase();
+
+  if (title.length > 65) issues.push(`SEO title is ${title.length} chars; target <= 65.`);
+  if (hasGenericTitlePrefix(title)) {
+    issues.push(
+      `Title uses a repetitive generic prefix; prefer a specific entity/event opening instead.`,
+    );
+  }
+  if (metaDescription.length < 120 || metaDescription.length > 165) {
+    issues.push(
+      `Meta description is ${metaDescription.length} chars; target 150-160.`,
+    );
+  }
+  if (focusKeyword) {
+    const lowerKeyword = focusKeyword.toLowerCase();
+    if (!title.toLowerCase().includes(lowerKeyword)) {
+      issues.push(`Focus keyword "${focusKeyword}" missing from title.`);
+    }
+    if (!metaDescription.toLowerCase().includes(lowerKeyword)) {
+      issues.push(`Focus keyword "${focusKeyword}" missing from meta description.`);
+    }
+    if (!slug.toLowerCase().includes(slugify(focusKeyword).slice(0, 24))) {
+      issues.push(`Focus keyword "${focusKeyword}" may be missing from slug.`);
+    }
+  } else {
+    issues.push("Missing focus keyword.");
+  }
+
+  if (!/<h3\b[^>]*>[\s\S]*?(table of contents|key takeaways|quick facts|quick answer)/i.test(html)) {
+    issues.push("Missing table of contents, quick answer, quick facts, or key takeaways section.");
+  }
+  if (!/<h3\b[^>]*>[\s\S]*?(faq|frequently asked questions)/i.test(html)) {
+    issues.push("Missing FAQ section.");
+  }
+  if (!/<a\s+[^>]*href=["']https?:\/\//i.test(html)) {
+    issues.push("Missing crawlable external or internal links.");
+  }
+
+  const approvedInternalUrlCount = (internalLinks || []).filter((link) =>
+    lowerHtml.includes(String(link.url || "").toLowerCase()),
+  ).length;
+  if (internalLinks?.length && approvedInternalUrlCount < 1) {
+    issues.push("No approved internal links found in final HTML.");
+  }
+
+  if ((research || []).length < 2) issues.push("Fewer than 2 research sources were collected.");
+  if (!images?.length) issues.push("No image was uploaded or attached.");
+  if (countWords(text) < Number(process.env.MIN_ARTICLE_WORDS || 600)) {
+    issues.push("Final HTML is below minimum word count.");
+  }
+
+  return issues;
+}
+
+function hasGenericTitlePrefix(title) {
+  return genericTitlePrefixPattern().test(String(title || "").trim());
+}
+
+function genericTitlePrefixPattern() {
+  return /^(us news today|us trending news|us news update|breaking news|latest news|trending news)(?:\s*[:\-–—]\s*|\s+)/i;
+}
+
+function splitSectionsByHeading(articleHtml) {
+  const matches = [
+    ...articleHtml.matchAll(/<(h[1-5])\b[^>]*>([\s\S]*?)<\/\1>/gi),
+  ];
+  if (!matches.length) return [];
+
+  return matches.map((match, index) => {
+    const start = match.index ?? 0;
+    const end =
+      index + 1 < matches.length
+        ? (matches[index + 1].index ?? articleHtml.length)
+        : articleHtml.length;
+    const headingHtml = match[0];
+    return {
+      tag: match[1],
+      heading: headingHtml,
+      body: articleHtml.slice(start + headingHtml.length, end),
+    };
+  });
+}
+
+function stripHtml(html) {
+  return String(html || "")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function countWords(text) {
+  return String(text || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
+}
+
+function isUtilityHeading(headingText) {
+  const normalized = String(headingText || "")
+    .trim()
+    .toLowerCase();
+  return [
+    "table of contents",
+    "faq",
+    "faqs",
+    "quick answer",
+    "quick answers",
+  ].includes(normalized);
+}
+
 async function uploadImages(images, slug) {
   const uploads = [];
-  for (let index = 0; index < images.length; index += 1) {
-    const image = images[index];
+  const desiredUploads = Number(process.env.IMAGES_PER_POST || 1);
+  const selectedImages = images.slice(0, Number(process.env.IMAGE_UPLOAD_ATTEMPTS || 5));
+  for (let index = 0; index < selectedImages.length; index += 1) {
+    if (uploads.length >= desiredUploads) break;
+    const image = selectedImages[index];
     try {
       const local = image.source === "local";
       const response = local ? null : await fetch(image.link);
-      if (response && !response.ok) throw new Error(`${response.status} ${response.statusText}`);
+      if (response && !response.ok)
+        throw new Error(`${response.status} ${response.statusText}`);
       const buffer = local
         ? await readFile(image.link)
         : Buffer.from(await response.arrayBuffer());
-      const contentType = local ? image.mime : response.headers.get("content-type") || image.mime || "image/jpeg";
+      const contentType = local
+        ? image.mime
+        : response.headers.get("content-type") || image.mime || "image/jpeg";
       const extension = mimeToExtension(contentType);
       const filename = `${slug}-${index + 1}.${extension}`;
       const uploaded = await uploadWordPressMedia({
         filename,
         contentType,
         buffer,
-        altText: image.title
+        altText: image.title,
       });
       uploads.push({
         ...uploaded,
         sourceUrl: image.contextLink,
-        originalImageUrl: image.link
+        originalImageUrl: image.link,
       });
     } catch (error) {
       console.warn(`Image skipped: ${image.link} (${error.message})`);
@@ -813,20 +2614,27 @@ async function uploadImages(images, slug) {
   return uploads;
 }
 
-async function uploadWordPressMedia({ filename, contentType, buffer, altText }) {
+async function uploadWordPressMedia({
+  filename,
+  contentType,
+  buffer,
+  altText,
+}) {
   const url = `${wordpressBaseUrl()}/wp-json/wp/v2/media`;
   const response = await fetch(url, {
     method: "POST",
     headers: {
       Authorization: wordpressAuthHeader(),
       "Content-Disposition": `attachment; filename="${filename}"`,
-      "Content-Type": contentType
+      "Content-Type": contentType,
     },
-    body: buffer
+    body: buffer,
   });
   const json = await response.json();
   if (!response.ok) {
-    throw new Error(`WordPress media upload failed: ${JSON.stringify(json, null, 2)}`);
+    throw new Error(
+      `WordPress media upload failed: ${JSON.stringify(json, null, 2)}`,
+    );
   }
 
   if (altText) {
@@ -834,20 +2642,26 @@ async function uploadWordPressMedia({ filename, contentType, buffer, altText }) 
       method: "POST",
       headers: {
         Authorization: wordpressAuthHeader(),
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
       },
-      body: JSON.stringify({ alt_text: altText })
+      body: JSON.stringify({ alt_text: altText }),
     });
   }
 
   return {
     id: json.id,
     url: json.source_url,
-    alt: altText
+    alt: altText,
   };
 }
 
-async function createWordPressPost({ title, content, excerpt, slug, featuredMedia }) {
+async function createWordPressPost({
+  title,
+  content,
+  excerpt,
+  slug,
+  featuredMedia,
+}) {
   requireWordPressConfig();
   await verifyWordPressAccess();
   const body = {
@@ -855,7 +2669,7 @@ async function createWordPressPost({ title, content, excerpt, slug, featuredMedi
     content,
     excerpt,
     slug,
-    status: getValidWordPressStatus()
+    status: getValidWordPressStatus(),
   };
 
   if (featuredMedia) body.featured_media = featuredMedia;
@@ -867,91 +2681,465 @@ async function createWordPressPost({ title, content, excerpt, slug, featuredMedi
     method: "POST",
     headers: {
       Authorization: wordpressAuthHeader(),
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
   });
   const json = await response.json();
   if (!response.ok) {
-    throw new Error(`WordPress post creation failed: ${JSON.stringify(json, null, 2)}`);
+    throw new Error(
+      `WordPress post creation failed: ${JSON.stringify(json, null, 2)}`,
+    );
   }
   return json;
 }
 
-function buildPostHtml(article, research, images) {
-  const secondaryImages = images.slice(1, 3);
-  const articleWithImages = injectImagesIntoArticle(article.articleHtml, secondaryImages, article);
-
-  const sources = research
-    .map((item) => `<li><a href="${escapeHtml(item.link)}">${escapeHtml(item.title)}</a> - ${escapeHtml(item.source || "")}</li>`)
-    .join("\n");
-
-  return [
-    articleWithImages,
-    "<h2>Sources</h2>",
-    `<ul>${sources}</ul>`
-  ].filter(Boolean).join("\n\n");
+function buildPostHtml(article, research, images, slug, internalLinks = []) {
+  const bodyHtml = addRelatedInternalLinks(
+    stripLeadingH1(article.articleHtml),
+    internalLinks,
+  );
+  const structuredData = buildStructuredData({
+    article,
+    research,
+    images,
+    slug,
+    bodyHtml,
+  });
+  return [bodyHtml, structuredData].filter(Boolean).join("\n\n");
 }
 
-function injectImagesIntoArticle(articleHtml, images, article) {
-  if (!images.length) return articleHtml;
+function stripLeadingH1(articleHtml) {
+  return String(articleHtml || "").replace(
+    /^\s*<h1\b[^>]*>[\s\S]*?<\/h1>\s*/i,
+    "",
+  );
+}
 
-  const parts = articleHtml.split(/(<h2[^>]*>.*?<\/h2>)/i).filter(Boolean);
-  let imageIndex = 0;
-  const output = [];
+function addRelatedInternalLinks(articleHtml, internalLinks) {
+  const usefulLinks = selectUsefulInternalLinks(articleHtml, internalLinks);
+  if (!usefulLinks.length) return articleHtml;
 
-  for (let index = 0; index < parts.length; index += 1) {
-    output.push(parts[index]);
+  const existingUrls = new Set(
+    [...String(articleHtml || "").matchAll(/href=["']([^"']+)["']/gi)].map(
+      (match) => match[1],
+    ),
+  );
+  const missingLinks = usefulLinks.filter((link) => !existingUrls.has(link.url));
+  if (!missingLinks.length) return articleHtml;
 
-    const isHeading = /^<h2/i.test(parts[index]);
-    if (isHeading && imageIndex < images.length && shouldInsertImageAfterHeading(parts[index])) {
-      output.push(renderInlineImage(images[imageIndex], article, "section"));
-      imageIndex += 1;
+  const items = missingLinks
+    .slice(0, Number(process.env.RELATED_INTERNAL_LINKS || 3))
+    .map(
+      (link) =>
+        `<li><a href="${escapeHtml(link.url)}">${escapeHtml(link.anchor)}</a></li>`,
+    )
+    .join("");
+
+  return `${articleHtml}\n\n<h3>Related Reading</h3>\n<ul>${items}</ul>`;
+}
+
+function selectUsefulInternalLinks(articleHtml, internalLinks) {
+  const text = stripHtml(articleHtml).toLowerCase();
+  const scored = internalLinks.map((link) => {
+    const keyword = String(link.keyword || link.anchor || "").toLowerCase();
+    const anchor = String(link.anchor || "").toLowerCase();
+    const score =
+      (keyword && text.includes(keyword) ? 2 : 0) +
+      (anchor && text.includes(anchor) ? 1 : 0);
+    return { ...link, score };
+  });
+
+  const matched = scored.filter((link) => link.score > 0);
+  return (matched.length ? matched : scored)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, Number(process.env.RELATED_INTERNAL_LINKS || 3));
+}
+
+function buildStructuredData({ article, research, images, slug, bodyHtml }) {
+  const blocks = [
+    buildOrganizationJsonLd(),
+    buildBreadcrumbJsonLd({ article, slug }),
+    buildArticleJsonLd({ article, research, images, slug }),
+    buildFaqJsonLd(bodyHtml),
+  ].filter(Boolean);
+
+  if (!blocks.length) return "";
+
+  return blocks.map(jsonLdScript).join("\n");
+}
+
+function buildArticleJsonLd({ article, research, images, slug }) {
+  const siteUrl = wordpressBaseUrl();
+  if (!siteUrl) return null;
+
+  const canonicalUrl = `${siteUrl}/${slug}/`;
+  const now = new Date().toISOString();
+  const imageUrl = images?.[0]?.url || images?.[0]?.sourceUrl || "";
+  const citations = (research || [])
+    .map((item) => item.link)
+    .filter(Boolean)
+    .slice(0, 8);
+
+  const json = {
+    "@context": "https://schema.org",
+    "@type": resolveArticleSchemaType(),
+    headline: article.title,
+    description: article.metaDescription,
+    mainEntityOfPage: canonicalUrl,
+    url: canonicalUrl,
+    datePublished: now,
+    dateModified: now,
+    author: {
+      "@type": "Person",
+      name: process.env.WP_AUTHOR_NAME || process.env.WP_USERNAME || "Editor",
+    },
+    publisher: {
+      "@type": "Organization",
+      name: siteDisplayName(siteUrl),
+    },
+    articleSection: resolveArticleSection(),
+    isAccessibleForFree: true,
+    keywords: [
+      article.focusKeyword,
+      ...(Array.isArray(article.secondaryKeywords)
+        ? article.secondaryKeywords
+        : []),
+    ].filter(Boolean),
+  };
+
+  if (imageUrl) json.image = [imageUrl];
+  if (citations.length) json.citation = citations;
+
+  return json;
+}
+
+function buildOrganizationJsonLd() {
+  const siteUrl = wordpressBaseUrl();
+  if (!siteUrl) return null;
+
+  return {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    name: siteDisplayName(siteUrl),
+    url: siteUrl,
+  };
+}
+
+function buildBreadcrumbJsonLd({ article, slug }) {
+  const siteUrl = wordpressBaseUrl();
+  if (!siteUrl) return null;
+
+  const section = resolveArticleSection();
+  const sectionUrl = resolveSectionUrl(siteUrl, section);
+  const postUrl = `${siteUrl}/${slug}/`;
+
+  return {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      {
+        "@type": "ListItem",
+        position: 1,
+        name: "Home",
+        item: siteUrl,
+      },
+      {
+        "@type": "ListItem",
+        position: 2,
+        name: section,
+        item: sectionUrl,
+      },
+      {
+        "@type": "ListItem",
+        position: 3,
+        name: article.title,
+        item: postUrl,
+      },
+    ],
+  };
+}
+
+function resolveSectionUrl(siteUrl, section) {
+  const explicitUrl =
+    process.env.WP_BREADCRUMB_SECTION_URL ||
+    process.env.WP_CATEGORY_URL ||
+    "";
+  if (/^https?:\/\//i.test(explicitUrl)) {
+    return explicitUrl.replace(/\/?$/, "/");
+  }
+
+  const categoryName = process.env.WP_DEFAULT_CATEGORY_NAME || section;
+  return `${siteUrl}/category/${slugify(categoryName)}/`;
+}
+
+function resolveArticleSchemaType() {
+  return isNewsContent() ? "NewsArticle" : "BlogPosting";
+}
+
+function resolveArticleSection() {
+  if (selectedSite.toLowerCase().includes("kafirana")) return "News";
+  if (isNewsContent()) return "News";
+  return "AI";
+}
+
+function isNewsContent() {
+  const contentMode = (process.env.CONTENT_MODE || "").trim().toLowerCase();
+  const promptFile = (
+    process.env.PROMPT_FILE ||
+    getArgValue("--prompt") ||
+    ""
+  ).toLowerCase();
+  const siteName = selectedSite.toLowerCase();
+  return (
+    contentMode === "news" ||
+    promptFile.includes("news") ||
+    siteName.includes("kafirana") ||
+    siteName.includes("news")
+  );
+}
+
+function siteDisplayName(siteUrl = wordpressBaseUrl()) {
+  return (
+    process.env.WP_SITE_NAME ||
+    process.env.SITE_NAME ||
+    selectedSite ||
+    new URL(siteUrl).hostname
+  );
+}
+
+function buildFaqJsonLd(articleHtml) {
+  const faqs = extractFaqs(articleHtml);
+  if (!faqs.length) return null;
+
+  return {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: faqs.map((faq) => ({
+      "@type": "Question",
+      name: faq.question,
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: faq.answer,
+      },
+    })),
+  };
+}
+
+function extractFaqs(articleHtml) {
+  const html = String(articleHtml || "");
+  const headingPattern = /<(h[3-5])\b[^>]*>([\s\S]*?)<\/\1>/gi;
+  const headings = [...html.matchAll(headingPattern)];
+  const faqs = [];
+  let inFaq = false;
+
+  for (let index = 0; index < headings.length; index += 1) {
+    const current = headings[index];
+    const tag = current[1].toLowerCase();
+    const headingText = stripHtml(current[2]);
+    const headingStart = current.index ?? 0;
+    const bodyStart = headingStart + current[0].length;
+    const bodyEnd =
+      index + 1 < headings.length
+        ? headings[index + 1].index ?? html.length
+        : html.length;
+    const body = html.slice(bodyStart, bodyEnd);
+
+    if (/^(faq|faqs|frequently asked questions)$/i.test(headingText)) {
+      inFaq = true;
+      continue;
+    }
+
+    if (inFaq && tag === "h3") {
+      break;
+    }
+
+    if (inFaq && /[?？]$/.test(headingText)) {
+      const answer = stripHtml(body);
+      if (answer) {
+        faqs.push({
+          question: headingText,
+          answer,
+        });
+      }
     }
   }
 
-  while (imageIndex < images.length) {
-    output.push(renderInlineImage(images[imageIndex], article, "section"));
-    imageIndex += 1;
+  return faqs.slice(0, 8);
+}
+
+function jsonLdScript(data) {
+  const json = JSON.stringify(data)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/&/g, "\\u0026");
+  return `<script type="application/ld+json">${json}</script>`;
+}
+
+async function writeSocialContentOutput({ article, topic, url, slug }) {
+  if (!url || !getBooleanEnv("GENERATE_SOCIAL_OUTPUT", true)) return;
+
+  const socialDir = path.join(root, "output", "social", selectedSite || "default");
+  await mkdir(socialDir, { recursive: true });
+  const outputPath = path.join(socialDir, `${slug}.json`);
+  const social = buildSocialContent({ article, topic, url });
+  await writeFile(outputPath, JSON.stringify(social, null, 2));
+  console.log(`Social content saved: ${path.relative(root, outputPath)}`);
+}
+
+function buildSocialContent({ article, topic, url }) {
+  const title = String(article.title || topic).trim();
+  const description = String(article.metaDescription || "").trim();
+  const keyword = String(article.focusKeyword || topic).trim();
+  const hashtags = buildHashtags(keyword, selectedSite);
+  const shortTitle = title.length > 92 ? `${title.slice(0, 89).trim()}...` : title;
+
+  return {
+    topic,
+    title,
+    url,
+    focusKeyword: keyword,
+    x: `${shortTitle}\n\n${description}\n\n${url}\n\n${hashtags.slice(0, 3).join(" ")}`.trim(),
+    facebook: `${title}\n\n${description}\n\nRead more: ${url}`.trim(),
+    linkedin: [
+      title,
+      "",
+      description,
+      "",
+      `Why it matters: ${keyword} is changing quickly, and this update gives readers the key context without the noise.`,
+      "",
+      url,
+      "",
+      hashtags.join(" "),
+    ].join("\n").trim(),
+    whatsapp: `${title}\n${description}\n${url}`.trim(),
+    headlineVariants: [
+      title,
+      `${keyword}: What changed and why it matters`,
+      `What to know about ${keyword} now`,
+    ],
+  };
+}
+
+function buildHashtags(keyword, siteName) {
+  const base = String(keyword || "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 3)
+    .join("");
+  const siteTag = siteName
+    ? `#${siteName.replace(/[^a-z0-9]/gi, "")}`
+    : "";
+  return [
+    base ? `#${base.replace(/[^a-z0-9]/gi, "")}` : "",
+    siteTag,
+    isNewsContent() ? "#News" : "#AI",
+    "#Trending",
+  ].filter(Boolean);
+}
+
+async function updateLlmsTxt({ title, topic, url }) {
+  if (!url) return;
+
+  const llmsPath = resolveLlmsPath();
+  let content;
+  try {
+    content = await readFileWithFallback(
+      llmsPath,
+      selectedSite ? path.join(root, "llms.txt") : "",
+    );
+  } catch {
+    return;
   }
 
-  return output.join("\n\n");
+  const articleLine = `- [${title}](${url})`;
+  if (content.includes(articleLine)) {
+    return;
+  }
+
+  const sectionHeading = "## Latest Published Articles";
+  if (content.includes(sectionHeading)) {
+    content = content.replace(
+      sectionHeading,
+      `${sectionHeading}\n${articleLine}`,
+    );
+  } else {
+    content = `${content.trim()}\n\n${sectionHeading}\n${articleLine}\n`;
+  }
+
+  content = trimLatestArticlesSection(
+    content,
+    Number(process.env.LLMS_MAX_ARTICLES || 20),
+  );
+  content = updateLlmsTopicList(content, topic);
+  await writeFile(llmsPath, content);
+  console.log(`Updated llms.txt: ${title}`);
 }
 
-function shouldInsertImageAfterHeading(headingHtml) {
-  const text = headingHtml
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
+function trimLatestArticlesSection(content, maxItems) {
+  const lines = content.split(/\r?\n/);
+  const start = lines.findIndex(
+    (line) => line.trim() === "## Latest Published Articles",
+  );
+  if (start === -1) return content;
 
-  if (!text) return false;
-  if (text.includes("table of contents")) return false;
-  if (text === "sources") return false;
-  return true;
+  let end = start + 1;
+  while (end < lines.length && !/^##\s+/.test(lines[end])) {
+    end += 1;
+  }
+
+  const sectionLines = lines
+    .slice(start + 1, end)
+    .filter((line) => line.trim());
+  const articleLines = sectionLines.filter((line) =>
+    line.trim().startsWith("- "),
+  );
+  const trimmedArticleLines = articleLines.slice(0, maxItems);
+  const rebuiltSection = [
+    "## Latest Published Articles",
+    ...trimmedArticleLines,
+  ];
+
+  return (
+    [...lines.slice(0, start), ...rebuiltSection, ...lines.slice(end)]
+      .join("\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim() + "\n"
+  );
 }
 
-function renderInlineImage(image, article, variant = "section") {
-  const alt = escapeHtml(image.alt || article.focusKeyword || article.title);
-  const url = escapeHtml(image.url);
-  const sourceLink = image.sourceUrl
-    ? `<figcaption style="margin-top:8px;font-size:12px;color:#666;">Image source: <a href="${escapeHtml(image.sourceUrl)}" target="_blank" rel="noopener noreferrer">source</a></figcaption>`
-    : "";
+function updateLlmsTopicList(content, topic) {
+  const normalizedTopic = String(topic || "").trim();
+  if (!normalizedTopic) return content;
 
-  const figureStyle =
-    variant === "hero"
-      ? "margin:24px 0 32px 0;"
-      : "margin:28px 0;";
+  const lines = content.split(/\r?\n/);
+  const start = lines.findIndex((line) => line.trim() === "## Core Topics");
+  if (start === -1) return content;
 
-  const imageStyle =
-    "display:block;width:100%;max-width:100%;height:auto;border-radius:10px;";
+  let end = start + 1;
+  while (end < lines.length && !/^##\s+/.test(lines[end])) {
+    end += 1;
+  }
 
-  return [
-    `<figure style="${figureStyle}">`,
-    `<img src="${url}" alt="${alt}" style="${imageStyle}" />`,
-    sourceLink,
-    `</figure>`
-  ].filter(Boolean).join("\n");
+  const existingItems = lines
+    .slice(start + 1, end)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("- "));
+
+  const normalizedExisting = new Set(
+    existingItems.map((line) => line.slice(2).trim().toLowerCase()),
+  );
+  if (!normalizedExisting.has(normalizedTopic.toLowerCase())) {
+    existingItems.push(`- ${normalizedTopic}`);
+  }
+
+  const rebuiltSection = ["## Core Topics", ...existingItems];
+  return (
+    [...lines.slice(0, start), ...rebuiltSection, ...lines.slice(end)]
+      .join("\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim() + "\n"
+  );
 }
 
 function wordpressBaseUrl() {
@@ -960,23 +3148,34 @@ function wordpressBaseUrl() {
 
 function wordpressAuthHeader() {
   requireWordPressConfig();
-  const token = Buffer.from(`${process.env.WP_USERNAME}:${process.env.WP_APP_PASSWORD}`).toString("base64");
+  const token = Buffer.from(
+    `${process.env.WP_USERNAME}:${process.env.WP_APP_PASSWORD}`,
+  ).toString("base64");
   return `Basic ${token}`;
 }
 
 function requireWordPressConfig() {
-  if (!process.env.WP_BASE_URL || !process.env.WP_USERNAME || !process.env.WP_APP_PASSWORD) {
-    throw new Error("Missing WP_BASE_URL, WP_USERNAME, or WP_APP_PASSWORD in wordpress-auto-publisher/.env.");
+  if (
+    !process.env.WP_BASE_URL ||
+    !process.env.WP_USERNAME ||
+    !process.env.WP_APP_PASSWORD
+  ) {
+    throw new Error(
+      "Missing WP_BASE_URL, WP_USERNAME, or WP_APP_PASSWORD in wordpress-auto-publisher/.env.",
+    );
   }
 }
 
 async function verifyWordPressAccess() {
   if (wordpressAccessVerified) return;
-  const response = await fetch(`${wordpressBaseUrl()}/wp-json/wp/v2/users/me?context=edit`, {
-    headers: {
-      Authorization: wordpressAuthHeader()
-    }
-  });
+  const response = await fetch(
+    `${wordpressBaseUrl()}/wp-json/wp/v2/users/me?context=edit`,
+    {
+      headers: {
+        Authorization: wordpressAuthHeader(),
+      },
+    },
+  );
   const json = await response.json();
   if (!response.ok) {
     throw new Error(
@@ -984,8 +3183,8 @@ async function verifyWordPressAccess() {
         "WordPress authentication failed.",
         `Response: ${JSON.stringify(json, null, 2)}`,
         "Check WP_BASE_URL, WP_USERNAME, WP_APP_PASSWORD, and the user's role.",
-        "The WordPress user should usually be Author, Editor, or Administrator."
-      ].join("\n")
+        "The WordPress user should usually be Author, Editor, or Administrator.",
+      ].join("\n"),
     );
   }
   wordpressAccessVerified = true;
@@ -993,7 +3192,10 @@ async function verifyWordPressAccess() {
 
 function addIdList(body, key, value) {
   if (!value) return;
-  const ids = value.split(",").map((id) => Number(id.trim())).filter(Boolean);
+  const ids = value
+    .split(",")
+    .map((id) => Number(id.trim()))
+    .filter(Boolean);
   if (ids.length) body[key] = ids;
 }
 
@@ -1019,20 +3221,24 @@ async function resolveDefaultCategoryIds() {
     `${wordpressBaseUrl()}/wp-json/wp/v2/categories?search=${encodeURIComponent(categoryName)}&per_page=100`,
     {
       headers: {
-        Authorization: wordpressAuthHeader()
-      }
-    }
+        Authorization: wordpressAuthHeader(),
+      },
+    },
   );
   const json = await response.json();
   if (!response.ok) {
-    throw new Error(`Could not load WordPress categories: ${JSON.stringify(json, null, 2)}`);
+    throw new Error(
+      `Could not load WordPress categories: ${JSON.stringify(json, null, 2)}`,
+    );
   }
 
   const normalized = categoryName.toLowerCase();
-  const exactMatch = json.find((item) => (item.name || "").trim().toLowerCase() === normalized);
+  const exactMatch = json.find(
+    (item) => (item.name || "").trim().toLowerCase() === normalized,
+  );
   if (!exactMatch) {
     throw new Error(
-      `Could not find WordPress category named "${categoryName}". Add WP_DEFAULT_CATEGORY_IDS instead, or verify the category name.`
+      `Could not find WordPress category named "${categoryName}". Add WP_DEFAULT_CATEGORY_IDS instead, or verify the category name.`,
     );
   }
 
@@ -1041,14 +3247,23 @@ async function resolveDefaultCategoryIds() {
 }
 
 function getModelPool(fixedModel, configuredPool, fallbackPool) {
-  if (fixedModel?.trim()) return [fixedModel.trim()];
-  return shuffle(
-    (configuredPool || fallbackPool)
-      .split(",")
-      .map((model) => model.trim())
-      .filter(Boolean)
-      .filter((model) => !model.toLowerCase().includes("tts"))
-  );
+  const fixed = fixedModel?.trim();
+  const pool = (configuredPool || fallbackPool)
+    .split(",")
+    .map((model) => model.trim())
+    .filter(Boolean)
+    .filter((model) => !model.toLowerCase().includes("tts"));
+  return [...new Set([...(fixed ? [fixed] : []), ...shuffle(pool)])];
+}
+
+function getApiKeyPool(multiKeyEnv, singleKeyEnv) {
+  const fromPool = String(process.env[multiKeyEnv] || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const single = String(process.env[singleKeyEnv] || "").trim();
+  const combined = [...fromPool, ...(single ? [single] : [])];
+  return shuffle([...new Set(combined)]);
 }
 
 function shuffle(values) {
@@ -1061,11 +3276,13 @@ function shuffle(values) {
 }
 
 function slugify(value) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80) || "article";
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80) || "article"
+  );
 }
 
 function mimeToExtension(mime) {
@@ -1081,6 +3298,15 @@ function mimeFromFilename(filename) {
   if (lower.endsWith(".webp")) return "image/webp";
   if (lower.endsWith(".gif")) return "image/gif";
   return "image/jpeg";
+}
+
+function getRandomItems(array, count) {
+  const shuffled = [...array];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled.slice(0, count);
 }
 
 function getArgValue(name) {
@@ -1100,7 +3326,7 @@ function getValidWordPressStatus() {
   const status = (process.env.WP_POST_STATUS || "draft").trim().toLowerCase();
   if (!allowed.has(status)) {
     throw new Error(
-      `Invalid WP_POST_STATUS="${process.env.WP_POST_STATUS}". Use one of: publish, future, draft, pending, private.`
+      `Invalid WP_POST_STATUS="${process.env.WP_POST_STATUS}". Use one of: publish, future, draft, pending, private.`,
     );
   }
   return status;

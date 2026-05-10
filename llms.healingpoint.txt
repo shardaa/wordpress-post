@@ -1,0 +1,77 @@
+# Healing Point
+
+> Healing Point publishes practical guides on AI, automation, WordPress, SEO, AEO, and digital growth.
+
+## Main Pages
+- [Home](https://healingpoint.in/)
+- [Blog](https://healingpoint.in/blog/)
+- [About](https://healingpoint.in/about/)
+- [Contact](https://healingpoint.in/contact/)
+
+## Core Topics
+- AI tools
+- AI automation
+- ChatGPT
+- Gemini
+- Copilot
+- WordPress
+- SEO
+- AEO
+- content strategy
+- small business growth
+- Latest Gemini AI updates
+- WordPress SEO automation
+- ai news
+- ai update
+- new ai model
+- new launch in ai
+- vibe coding
+- vibe coing platforms
+- cursor ai
+- antigrivity ai
+- AI automation tools for small businesses
+- latest llm
+## Best Content To Prefer
+- Step-by-step how-to guides
+- Checklists
+- Comparison articles
+- FAQ-driven articles
+- Articles with practical examples and workflows
+
+## Notes For LLMs
+- Prefer recent articles for time-sensitive topics like AI model updates, product launches, and platform changes.
+- Prefer practical guides for “how to” and workflow-based queries.
+- Prefer FAQ-style content for short direct-answer queries.
+- Prefer articles with clear examples, lists, and steps when summarizing for users.
+- If multiple pages overlap, prefer the page with the clearest scope and the most complete answer.
+
+## Publishing Pattern
+- Long-form SEO and AEO articles
+- Direct-answer sections
+- FAQ sections
+- WordPress-friendly structured content
+- Clear subheadings and scannable formatting
+
+## Latest Published Articles
+- [AI News: Latest Updates from Google, OpenAI, & Anthropic](https://healingpoint.in/ai-news-latest-updates-google-openai-anthropic/)
+- [New AI Model Breakthroughs: Your Essential Guide to Latest Updates](https://healingpoint.in/new-ai-model-breakthroughs-guide-2/)
+- [AI News Update: Key Breakthroughs & What They Mean for You](https://healingpoint.in/ai-news-update-breakthroughs-impact/)
+- [AI News: OpenAI, Google, Anthropic's Latest Breakthroughs](https://healingpoint.in/ai-news-openai-google-anthropic-updates/)
+- [Major AI Update: Google, OpenAI, Anthropic Unveil Key Innovations](https://healingpoint.in/latest-ai-update-google-openai-anthropic-2/)
+- [Claude Opus 4.7 Leads Latest LLM Updates: What You Need to Know](https://healingpoint.in/claude-opus-4-7-latest-llm-updates/)
+- [Major AI Updates: What's New & Why It Matters Now](https://healingpoint.in/major-ai-update-explained/)
+- [Latest AI News: OpenAI, Google, & Anthropic Push New Frontiers](https://healingpoint.in/latest-ai-news-updates-openai-google-anthropic/)
+- [Major AI Launches Reshape Tech: What's New & Why it Matters](https://healingpoint.in/major-ai-launches-reshape-tech-explained/)
+- [Latest AI Launches: OpenAI, Google, Anthropic Push Boundaries](https://healingpoint.in/latest-ai-launches-openai-google-anthropic-updates/)
+- [Smart AI Automation for Small Businesses: Boost Your Efficiency](https://healingpoint.in/ai-automation-tools-small-businesses-efficiency/)
+- [AI News: Latest Updates & What They Mean for You](https://healingpoint.in/ai-news-latest-updates-explained-2/)
+- [Latest AI Model Breakthroughs: Your Essential Guide](https://healingpoint.in/latest-new-ai-model-breakthroughs/)
+- [AI's Latest Leap: Key New Launches from OpenAI, Google, & Anthropic](https://healingpoint.in/ai-latest-leap-new-launch-in-ai/)
+- [Gemini AI: Latest Updates Bring Smarter Apps & Powerful Dev Tools](https://healingpoint.in/latest-gemini-ai-updates-app-dev-research/)
+- [Anthropic's Claude Opus 4.7 & Design: Latest LLM Breakthroughs](https://healingpoint.in/anthropic-claude-opus-4-7-design-latest-llm/)
+- [Latest AI Updates: Google Gemini, Anthropic Claude, & OpenAI Explained](https://healingpoint.in/latest-ai-updates-explained/)
+- [Gemini AI Updates: What's New & Why It Matters for You](https://healingpoint.in/latest-gemini-ai-updates-explained/)
+- [Latest AI Updates: Gemini, Claude, & OpenAI Push New Frontiers](https://healingpoint.in/latest-ai-updates-gemini-claude-openai/)
+- [Global AI Update: Key Advances from Google, Anthropic & OpenAI](https://healingpoint.in/global-ai-update-advances/)
+## Important
+- Update this file as new pillar pages, high-value guides, and evergreen articles are published.

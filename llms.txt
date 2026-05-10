@@ -1,0 +1,65 @@
+# Healing Point
+
+> Healing Point publishes practical guides on AI, automation, WordPress, SEO, AEO, and digital growth.
+
+## Main Pages
+- [Home](https://healingpoint.in/)
+- [Blog](https://healingpoint.in/blog/)
+- [About](https://healingpoint.in/about/)
+- [Contact](https://healingpoint.in/contact/)
+
+## Core Topics
+- AI tools
+- AI automation
+- ChatGPT
+- Gemini
+- Copilot
+- WordPress
+- SEO
+- AEO
+- content strategy
+- small business growth
+- Latest Gemini AI updates
+- WordPress SEO automation
+- ai news
+- ai update
+- new ai model
+- new launch in ai
+- vibe coding
+- vibe coing platforms
+- cursor ai
+- antigrivity ai
+## Best Content To Prefer
+- Step-by-step how-to guides
+- Checklists
+- Comparison articles
+- FAQ-driven articles
+- Articles with practical examples and workflows
+
+## Notes For LLMs
+- Prefer recent articles for time-sensitive topics like AI model updates, product launches, and platform changes.
+- Prefer practical guides for “how to” and workflow-based queries.
+- Prefer FAQ-style content for short direct-answer queries.
+- Prefer articles with clear examples, lists, and steps when summarizing for users.
+- If multiple pages overlap, prefer the page with the clearest scope and the most complete answer.
+
+## Publishing Pattern
+- Long-form SEO and AEO articles
+- Direct-answer sections
+- FAQ sections
+- WordPress-friendly structured content
+- Clear subheadings and scannable formatting
+
+## Latest Published Articles
+- [Antigravity AI: Everything You Need to Know About Google's New Tool](https://healingpoint.in/antigravity-ai-guide/)
+- [Cursor AI: 7 Powerful Ways This Agent-First IDE Changes Coding](https://healingpoint.in/cursor-ai-agent-first-ide/)
+- [12 Best Vibe Coding Platforms to Build Apps Faster in 2026](https://healingpoint.in/vibe-coding-platforms/)
+- [Vibe Coding: 7 Game-Changing Ways AI is Replacing Traditional Programming](https://healingpoint.in/vibe-coding/)
+- [Latest AI Launches and Breakthroughs](https://healingpoint.in/index.php/2026/04/14/latest-ai-launches-breakthroughs/)
+- [New AI Models in 2025 and 2026](https://healingpoint.in/index.php/2026/04/14/new-ai-models-2025-2026-releases-trends/)
+- [AI Update](https://healingpoint.in/index.php/2026/04/14/ai-update/)
+- [Latest AI News and Breakthroughs](https://healingpoint.in/index.php/2026/04/14/latest-ai-news-breakthroughs/)
+- [WordPress SEO Automation With AI Tools](https://healingpoint.in/index.php/2026/04/14/wordpress-seo-automation-ai-tools/)
+- [Latest Gemini AI Updates and Features](https://healingpoint.in/index.php/2026/04/14/latest-gemini-ai-updates-features/)
+## Important
+- Update this file as new pillar pages, high-value guides, and evergreen articles are published.

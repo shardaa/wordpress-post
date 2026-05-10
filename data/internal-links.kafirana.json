@@ -1,0 +1,22 @@
+[
+  {
+    "keyword": "US news",
+    "anchor": "US news updates",
+    "url": "https://kafirana.com/us-news-today-louisiana-shooting-iran-standoff/"
+  },
+  {
+    "keyword": "trending news",
+    "anchor": "trending news in the US",
+    "url": "https://kafirana.com/us-news-update-trump-iran-louisiana/"
+  },
+  {
+    "keyword": "what's happening in the US",
+    "anchor": "what's happening in the US",
+    "url": "https://kafirana.com/whats-happening-in-the-us-news-updates-3/"
+  },
+  {
+    "keyword": "breaking news",
+    "anchor": "breaking news updates",
+    "url": "https://kafirana.com/us-news-update-trump-iran-louisiana/"
+  }
+]
