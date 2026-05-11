@@ -52,6 +52,29 @@ async function fetchWithDnsFallback(url, options = {}) {
   }
 }
 
+async function fetchWithRetry(url, options = {}, label = "request") {
+  const attempts = Number(process.env.HTTP_RETRY_ATTEMPTS || 3);
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await fetch(url, options);
+    } catch (error) {
+      lastError = error;
+      if (attempt >= attempts) break;
+      const delayMs = Number(process.env.HTTP_RETRY_DELAY_MS || 1500) * attempt;
+      console.warn(
+        `${label} failed on attempt ${attempt}/${attempts}: ${formatNetworkError(error)}. Retrying in ${delayMs}ms.`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  throw new Error(
+    `${label} failed after ${attempts} attempt(s): ${formatNetworkError(lastError)}`,
+  );
+}
+
 async function resolveHost(hostname) {
   const addresses = [];
   try {
@@ -2621,15 +2644,19 @@ async function uploadWordPressMedia({
   altText,
 }) {
   const url = `${wordpressBaseUrl()}/wp-json/wp/v2/media`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: wordpressAuthHeader(),
-      "Content-Disposition": `attachment; filename="${filename}"`,
-      "Content-Type": contentType,
+  const response = await fetchWithRetry(
+    url,
+    {
+      method: "POST",
+      headers: {
+        Authorization: wordpressAuthHeader(),
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Type": contentType,
+      },
+      body: buffer,
     },
-    body: buffer,
-  });
+    "WordPress media upload",
+  );
   const json = await response.json();
   if (!response.ok) {
     throw new Error(
@@ -2638,14 +2665,18 @@ async function uploadWordPressMedia({
   }
 
   if (altText) {
-    await fetch(`${url}/${json.id}`, {
-      method: "POST",
-      headers: {
-        Authorization: wordpressAuthHeader(),
-        "Content-Type": "application/json",
+    await fetchWithRetry(
+      `${url}/${json.id}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: wordpressAuthHeader(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ alt_text: altText }),
       },
-      body: JSON.stringify({ alt_text: altText }),
-    });
+      "WordPress media alt text update",
+    );
   }
 
   return {
@@ -2677,14 +2708,18 @@ async function createWordPressPost({
   if (categoryIds.length) body.categories = categoryIds;
   addIdList(body, "tags", process.env.WP_DEFAULT_TAG_IDS);
 
-  const response = await fetch(`${wordpressBaseUrl()}/wp-json/wp/v2/posts`, {
-    method: "POST",
-    headers: {
-      Authorization: wordpressAuthHeader(),
-      "Content-Type": "application/json",
+  const response = await fetchWithRetry(
+    `${wordpressBaseUrl()}/wp-json/wp/v2/posts`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: wordpressAuthHeader(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
     },
-    body: JSON.stringify(body),
-  });
+    "WordPress post creation",
+  );
   const json = await response.json();
   if (!response.ok) {
     throw new Error(
@@ -3168,13 +3203,14 @@ function requireWordPressConfig() {
 
 async function verifyWordPressAccess() {
   if (wordpressAccessVerified) return;
-  const response = await fetch(
+  const response = await fetchWithRetry(
     `${wordpressBaseUrl()}/wp-json/wp/v2/users/me?context=edit`,
     {
       headers: {
         Authorization: wordpressAuthHeader(),
       },
     },
+    "WordPress user verification",
   );
   const json = await response.json();
   if (!response.ok) {
@@ -3217,13 +3253,14 @@ async function resolveDefaultCategoryIds() {
     return cachedCategoryIds;
   }
 
-  const response = await fetch(
+  const response = await fetchWithRetry(
     `${wordpressBaseUrl()}/wp-json/wp/v2/categories?search=${encodeURIComponent(categoryName)}&per_page=100`,
     {
       headers: {
         Authorization: wordpressAuthHeader(),
       },
     },
+    "WordPress category lookup",
   );
   const json = await response.json();
   if (!response.ok) {
