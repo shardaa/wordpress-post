@@ -15,13 +15,16 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     timeout-minutes: 210
+    env:
+      HTTP_RETRY_ATTEMPTS: "6"
+      HTTP_RETRY_DELAY_MS: "5000"
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -33,7 +36,7 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Restore publisher state
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             state
