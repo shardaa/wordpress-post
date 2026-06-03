@@ -54,11 +54,12 @@ async function fetchWithDnsFallback(url, options = {}) {
 
 async function fetchWithRetry(url, options = {}, label = "request") {
   const attempts = Number(process.env.HTTP_RETRY_ATTEMPTS || 3);
+  const timeoutMs = Number(options.timeout || 0);
   let lastError = null;
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
-      return await fetch(url, options);
+      return await fetchWithTimeout(url, options, timeoutMs);
     } catch (error) {
       lastError = error;
       if (attempt >= attempts) break;
@@ -73,6 +74,23 @@ async function fetchWithRetry(url, options = {}, label = "request") {
   throw new Error(
     `${label} failed after ${attempts} attempt(s): ${formatNetworkError(lastError)}`,
   );
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 0) {
+  if (!timeoutMs || timeoutMs <= 0) {
+    return fetch(url, options);
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: options.signal || controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function resolveHost(hostname) {
@@ -2673,12 +2691,13 @@ async function uploadImages(images, slug) {
   const uploads = [];
   const desiredUploads = Number(process.env.IMAGES_PER_POST || 1);
   const selectedImages = images.slice(0, Number(process.env.IMAGE_UPLOAD_ATTEMPTS || 5));
+  const imageTimeoutMs = Number(process.env.IMAGE_UPLOAD_TIMEOUT_MS || 10000);
   for (let index = 0; index < selectedImages.length; index += 1) {
     if (uploads.length >= desiredUploads) break;
     const image = selectedImages[index];
     try {
       const local = image.source === "local";
-      const response = local ? null : await fetch(image.link);
+      const response = local ? null : await fetchWithTimeout(image.link, {}, imageTimeoutMs);
       if (response && !response.ok)
         throw new Error(`${response.status} ${response.statusText}`);
       const buffer = local
@@ -2714,6 +2733,7 @@ async function uploadWordPressMedia({
   altText,
 }) {
   const url = `${wordpressBaseUrl()}/wp-json/wp/v2/media`;
+  const mediaTimeoutMs = Number(process.env.WP_MEDIA_UPLOAD_TIMEOUT_MS || 10000);
   const response = await fetchWithRetry(
     url,
     {
@@ -2724,6 +2744,7 @@ async function uploadWordPressMedia({
         "Content-Type": contentType,
       },
       body: buffer,
+      timeout: mediaTimeoutMs,
     },
     "WordPress media upload",
   );
