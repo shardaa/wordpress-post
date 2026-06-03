@@ -13,8 +13,19 @@ concurrency:
 
 jobs:
   publish:
+    name: Publish ${{ matrix.display_name }}
     runs-on: ubuntu-latest
-    timeout-minutes: 210
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - site: healingpoint
+            display_name: HealingPoint
+          - site: kafirana
+            display_name: Kafirana
+          - site: elitebulletin
+            display_name: Elite Bulletin
     env:
       HTTP_RETRY_ATTEMPTS: "6"
       HTTP_RETRY_DELAY_MS: "5000"
@@ -41,83 +52,73 @@ jobs:
           path: |
             state
             output
-          key: publisher-state-${{ github.run_id }}
+          key: publisher-state-${{ matrix.site }}-${{ github.run_id }}
           restore-keys: |
-            publisher-state-
+            publisher-state-${{ matrix.site }}-
 
-      - name: Create site env files
+      - name: Create site env file
         env:
+          SITE: ${{ matrix.site }}
+          DISPLAY_NAME: ${{ matrix.display_name }}
           HEALINGPOINT_ENV: ${{ secrets.HEALINGPOINT_ENV }}
           KAFIRANA_ENV: ${{ secrets.KAFIRANA_ENV }}
+          ELITEBULLETIN_ENV: ${{ secrets.ELITEBULLETIN_ENV }}
         run: |
-          if [ -z "$HEALINGPOINT_ENV" ]; then
-            echo "Missing GitHub secret: HEALINGPOINT_ENV"
-            exit 1
-          fi
-          if [ -z "$KAFIRANA_ENV" ]; then
-            echo "Missing GitHub secret: KAFIRANA_ENV"
-            exit 1
-          fi
-          printf '%s' "$HEALINGPOINT_ENV" > healingpoint.env
-          printf '%s' "$KAFIRANA_ENV" > kafirana.env
+          case "$SITE" in
+            healingpoint)
+              site_env="$HEALINGPOINT_ENV"
+              ;;
+            kafirana)
+              site_env="$KAFIRANA_ENV"
+              ;;
+            elitebulletin)
+              site_env="$ELITEBULLETIN_ENV"
+              ;;
+            *)
+              echo "Unknown site: $SITE"
+              exit 1
+              ;;
+          esac
 
-          normalize_gemini_key() {
-            file="$1"
-            if grep -Eq '^GEMINI_API_KEY=.+$' "$file"; then
-              return 0
-            fi
-            first_key="$(grep -E '^GEMINI_API_KEYS=' "$file" | head -n 1 | cut -d= -f2- | cut -d, -f1 | tr -d '[:space:]')"
+          if [ -z "$site_env" ]; then
+            echo "Missing GitHub secret for $DISPLAY_NAME"
+            exit 1
+          fi
+
+          printf '%s' "$site_env" > "$SITE.env"
+
+          if ! grep -Eq '^GEMINI_API_KEY=.+$' "$SITE.env"; then
+            first_key="$(grep -E '^GEMINI_API_KEYS=' "$SITE.env" | head -n 1 | cut -d= -f2- | cut -d, -f1 | tr -d '[:space:]')"
             if [ -n "$first_key" ]; then
-              grep -Ev '^GEMINI_API_KEY=' "$file" > "$file.tmp"
-              mv "$file.tmp" "$file"
-              printf '\nGEMINI_API_KEY=%s\n' "$first_key" >> "$file"
+              grep -Ev '^GEMINI_API_KEY=' "$SITE.env" > "$SITE.env.tmp"
+              mv "$SITE.env.tmp" "$SITE.env"
+              printf '\nGEMINI_API_KEY=%s\n' "$first_key" >> "$SITE.env"
             fi
-          }
-
-          normalize_gemini_key healingpoint.env
-          normalize_gemini_key kafirana.env
-
-          if ! grep -Eq '^GEMINI_API_KEY=.+$' healingpoint.env; then
-            echo "Could not derive GEMINI_API_KEY for healingpoint.env"
-            exit 1
           fi
-          if ! grep -Eq '^GEMINI_API_KEY=.+$' kafirana.env; then
-            echo "Could not derive GEMINI_API_KEY for kafirana.env"
+
+          if ! grep -Eq '^GEMINI_API_KEY=.+$' "$SITE.env"; then
+            echo "Could not derive GEMINI_API_KEY for $SITE.env"
             exit 1
           fi
 
-      - name: Export HealingPoint runtime env
+      - name: Export runtime env
+        env:
+          SITE: ${{ matrix.site }}
+          DISPLAY_NAME: ${{ matrix.display_name }}
         run: |
-          cp healingpoint.env .env
-          key="$(grep -E '^GEMINI_API_KEY=' healingpoint.env | tail -n 1 | cut -d= -f2-)"
+          cp "$SITE.env" .env
+          key="$(grep -E '^GEMINI_API_KEY=' "$SITE.env" | tail -n 1 | cut -d= -f2-)"
           if [ -z "$key" ]; then
-            echo "HealingPoint GEMINI_API_KEY is empty"
+            echo "$DISPLAY_NAME GEMINI_API_KEY is empty"
             exit 1
           fi
           echo "::add-mask::$key"
           echo "GEMINI_API_KEY=$key" >> "$GITHUB_ENV"
 
-      - name: Publish HealingPoint
+      - name: Publish ${{ matrix.display_name }}
         env:
           BROWSER_HEADLESS: "true"
           RANDOM_TOPIC: "true"
           ARTICLE_LIMIT: "1"
-        run: node scripts/publish_articles.mjs --site=healingpoint --research=browser
-
-      - name: Export Kafirana runtime env
-        run: |
-          cp kafirana.env .env
-          key="$(grep -E '^GEMINI_API_KEY=' kafirana.env | tail -n 1 | cut -d= -f2-)"
-          if [ -z "$key" ]; then
-            echo "Kafirana GEMINI_API_KEY is empty"
-            exit 1
-          fi
-          echo "::add-mask::$key"
-          echo "GEMINI_API_KEY=$key" >> "$GITHUB_ENV"
-
-      - name: Publish Kafirana
-        env:
-          BROWSER_HEADLESS: "true"
-          RANDOM_TOPIC: "true"
-          ARTICLE_LIMIT: "1"
-        run: node scripts/publish_articles.mjs --site=kafirana --research=browser
+          IMAGE_UPLOAD_ATTEMPTS: "1"
+        run: node scripts/publish_articles.mjs --site=${{ matrix.site }} --research=browser

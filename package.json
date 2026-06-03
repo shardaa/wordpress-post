@@ -5,7 +5,18 @@
   "scripts": {
     "start": "node server.mjs",
     "publish": "node scripts/publish_articles.mjs",
-    "dry-run": "node scripts/publish_articles.mjs --dry-run"
+    "dry-run": "node scripts/publish_articles.mjs --dry-run",
+    "publish:healingpoint": "node scripts/publish_articles.mjs --site=healingpoint --research=browser",
+    "publish:kafirana": "node scripts/publish_articles.mjs --site=kafirana --research=browser",
+    "publish:elitebulletin": "node scripts/publish_articles.mjs --site=elitebulletin --research=browser",
+    "start:healingpoint": "SITE=healingpoint node server.mjs",
+    "start:kafirana": "SITE=kafirana node server.mjs",
+    "start:elitebulletin": "SITE=elitebulletin node server.mjs",
+    "remote:dashboard": "RESEARCH_MODE=api node server.mjs",
+    "remote:healingpoint": "RESEARCH_MODE=api SITE=healingpoint node server.mjs",
+    "remote:kafirana": "RESEARCH_MODE=api SITE=kafirana node server.mjs",
+    "remote:elitebulletin": "RESEARCH_MODE=api SITE=elitebulletin node server.mjs",
+    "tunnel": "ngrok http 3000"
   },
   "dependencies": {
     "playwright": "^1.59.1"

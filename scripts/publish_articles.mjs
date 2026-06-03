@@ -212,6 +212,11 @@ async function main() {
     return;
   }
 
+  if (!dryRun) {
+    console.log("Verifying WordPress access...");
+    await verifyWordPressAccess();
+  }
+
   await mkdir(path.join(root, "state"), { recursive: true });
   await writeFile(processedPath, JSON.stringify(processed, null, 2)).catch(
     () => {},
@@ -328,6 +333,8 @@ function shouldPreserveRuntimeEnv(key) {
     "SEARCH_PAGE_TIMEOUT_MS",
     "SOURCE_PAGE_TIMEOUT_MS",
     "BROWSER_MAX_CANDIDATES",
+    "HTTP_RETRY_ATTEMPTS",
+    "HTTP_RETRY_DELAY_MS",
     "PORT",
     "SITE",
   ]);
@@ -414,11 +421,28 @@ async function readProcessed(processedPath) {
 
 async function readSiteContext() {
   const contextPath = path.join(root, ".agents", "product-marketing-context.md");
+  const siteRulesPath = selectedSite
+    ? path.join(root, ".agents", `${selectedSite}-style-rules.md`)
+    : "";
   try {
     const fullContext = await readFile(contextPath, "utf8");
     const section = extractMarkdownSection(fullContext, selectedSite);
-    return section || fullContext;
+    const baseContext = section || fullContext;
+    if (!siteRulesPath) return baseContext;
+    try {
+      const siteRules = await readFile(siteRulesPath, "utf8");
+      return `${baseContext}\n\n${siteRules}`;
+    } catch {
+      return baseContext;
+    }
   } catch {
+    if (siteRulesPath) {
+      try {
+        return await readFile(siteRulesPath, "utf8");
+      } catch {
+        return "";
+      }
+    }
     return "";
   }
 }
@@ -456,13 +480,13 @@ function normalizeInternalLinks(links) {
 }
 
 function extractMarkdownSection(markdown, sectionName) {
-  const normalizedSection = String(sectionName || "").trim().toLowerCase();
+  const normalizedSection = normalizeSectionName(sectionName);
   if (!normalizedSection) return "";
 
   const lines = markdown.split(/\r?\n/);
   const start = lines.findIndex((line) => {
     const match = line.match(/^##\s+(.+?)\s*$/);
-    return match && match[1].trim().toLowerCase() === normalizedSection;
+    return match && normalizeSectionName(match[1]) === normalizedSection;
   });
   if (start === -1) return "";
 
@@ -472,6 +496,13 @@ function extractMarkdownSection(markdown, sectionName) {
   }
 
   return lines.slice(start, end).join("\n").trim();
+}
+
+function normalizeSectionName(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
 }
 
 async function readFileWithFallback(primaryPath, fallbackPath) {
@@ -1037,8 +1068,25 @@ function getCuratedSourceUrls(topic) {
     /(new launch in ai|latest ai|ai update|ai news|new ai|new model|new tool|artificial intelligence update|llm update|ai breakthrough)/.test(
       lower,
     );
+  const isEliteStyleTopic =
+    isEliteBulletinSite() ||
+    /(free fire|gta|gaming|esports|smartphone|redmi|realme|samsung|oneplus|vivo|oppo|automobile|car|bike|ev|electric car|yojana|sarkari)/.test(
+      lower,
+    );
 
-  if (isBroadNewsTopic) {
+  if (isEliteStyleTopic) {
+    add(
+      "https://www.gadgets360.com/news",
+      "https://www.91mobiles.com/hub/",
+      "https://www.smartprix.com/bytes/",
+      "https://www.indiatodaygaming.com/",
+      "https://www.sportskeeda.com/esports",
+      "https://www.autocarindia.com/",
+      "https://www.carandbike.com/news",
+      "https://www.bikedekho.com/news",
+      "https://www.financialexpress.com/auto/",
+    );
+  } else if (isBroadNewsTopic) {
     add(
       "https://apnews.com/",
       "https://apnews.com/us-news",
@@ -1133,6 +1181,11 @@ function isRelevantCuratedSummary(summary, topic) {
     /(new launch in ai|latest ai|ai update|ai news|new ai|new model|new tool|artificial intelligence update|llm update|ai breakthrough)/.test(
       topic.toLowerCase(),
     );
+  const eliteStyleTopic =
+    isEliteBulletinSite() ||
+    /(free fire|gta|gaming|esports|smartphone|redmi|realme|samsung|oneplus|vivo|oppo|automobile|car|bike|ev|electric car|yojana|sarkari)/.test(
+      topic.toLowerCase(),
+    );
   const trustedNewsSource =
     /(?:^|\.)apnews\.com$|(?:^|\.)reuters\.com$|(?:^|\.)npr\.org$|(?:^|\.)usatoday\.com$|(?:^|\.)cbsnews\.com$|(?:^|\.)abcnews\.go\.com$|(?:^|\.)nbcnews\.com$|(?:^|\.)politico\.com$|(?:^|\.)axios\.com$/.test(
       String(summary.source || "").toLowerCase(),
@@ -1141,7 +1194,12 @@ function isRelevantCuratedSummary(summary, topic) {
     /(?:^|\.)reuters\.com$|(?:^|\.)techcrunch\.com$|(?:^|\.)theverge\.com$|(?:^|\.)zdnet\.com$|(?:^|\.)openai\.com$|(?:^|\.)blog\.google$|(?:^|\.)deepmind\.google$|(?:^|\.)anthropic\.com$|(?:^|\.)developers\.googleblog\.com$/.test(
       String(summary.source || "").toLowerCase(),
     );
+  const trustedEliteSource =
+    /(?:^|\.)gadgets360\.com$|(?:^|\.)91mobiles\.com$|(?:^|\.)smartprix\.com$|(?:^|\.)indiatodaygaming\.com$|(?:^|\.)sportskeeda\.com$|(?:^|\.)autocarindia\.com$|(?:^|\.)carandbike\.com$|(?:^|\.)bikedekho\.com$|(?:^|\.)financialexpress\.com$/.test(
+      String(summary.source || "").toLowerCase(),
+    );
 
+  if (eliteStyleTopic && trustedEliteSource) return true;
   if (broadNewsTopic && trustedNewsSource) return true;
   if (broadAiTopic && trustedAiSource) return true;
   if (!terms.length) return true;
@@ -1484,9 +1542,7 @@ async function buildArticlePromptPayload({
     attempt,
     topic,
     content_mode: (process.env.CONTENT_MODE || "").trim().toLowerCase() || null,
-    audience: selectedSite.toLowerCase().includes("kafirana")
-      ? "US news audience"
-      : "general audience",
+    audience: getAudienceLabel(),
     site: selectedSite || "default",
     site_context: context.siteContext || "No site context provided.",
     approved_internal_links: context.internalLinks || [],
@@ -1961,6 +2017,20 @@ function resolvePromptTemplate() {
   }
 
   return "article-writer.md";
+}
+
+function getAudienceLabel() {
+  if (selectedSite.toLowerCase().includes("kafirana")) {
+    return "US news audience";
+  }
+  if (isEliteBulletinSite()) {
+    return "Indian Hindi/Hinglish tech, gaming, automobile, AI, and yojana news audience";
+  }
+  return "general audience";
+}
+
+function isEliteBulletinSite() {
+  return selectedSite.toLowerCase().includes("elitebulletin");
 }
 
 async function callGemini({ instructions, prompt }) {

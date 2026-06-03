@@ -75,3 +75,42 @@ This file is local to this WordPress auto-publisher. It gives the article genera
 - Breaking news
 - Entertainment news
 - World news
+
+## EliteBulletin
+
+**One-liner:** Elite Bulletin publishes Hindi/Hinglish viral-style news updates on technology, esports, automobiles, AI, and useful yojana topics for Indian search readers.
+
+**Primary audience:** Indian readers who want quick, exciting, easy-to-understand updates about phones, games, cars, bikes, EVs, AI tools, and public-benefit schemes.
+
+**Content focus:**
+- Smartphone leaks, launches, specs, price expectations, and feature explainers
+- Esports and gaming updates, especially Free Fire, GTA, Call of Duty, events, rewards, diamonds, skins, and creator opportunities
+- Automobile news around cars, bikes, EVs, facelift models, mileage/range, pricing, EMI, safety, and features
+- AI and technology news written in simple Hindi/Hinglish
+- Yojana updates where the topic is useful for Indian households
+
+**Tone:** Hindi-first, Hinglish-friendly, energetic, mass-market, search-friendly, and easy to read. Keep the same lively Elite Bulletin feel, but do not invent facts.
+
+**What readers want:**
+- Kya naya hai
+- Iska fayda kya hai
+- Price, launch, date, feature, range, reward, or eligibility details
+- Rumor vs confirmed status
+- Simple explanation in everyday Hindi
+- A clickable but accurate headline
+
+**Topics to own:**
+- Latest technology news in Hindi
+- Free Fire Max events and rewards
+- GTA 6 and gaming updates
+- Smartphone leaks and launches
+- Electric car and automobile updates
+- AI news in Hindi
+- Sarkari yojana updates
+
+**Internal link priorities:**
+- Technology news
+- Esports updates
+- Automobile updates
+- AI news
+- Yojana updates

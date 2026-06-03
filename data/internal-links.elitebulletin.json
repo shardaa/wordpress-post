@@ -1,0 +1,27 @@
+[
+  {
+    "keyword": "technology news",
+    "anchor": "Technology news updates",
+    "url": "https://elitebulletin.in/category/technology/"
+  },
+  {
+    "keyword": "esports",
+    "anchor": "Esports updates",
+    "url": "https://elitebulletin.in/category/esports/"
+  },
+  {
+    "keyword": "automobile",
+    "anchor": "Automobile news",
+    "url": "https://elitebulletin.in/category/automobile/"
+  },
+  {
+    "keyword": "AI",
+    "anchor": "AI news",
+    "url": "https://elitebulletin.in/category/ai/"
+  },
+  {
+    "keyword": "yojana",
+    "anchor": "Yojana updates",
+    "url": "https://elitebulletin.in/category/yojana/"
+  }
+]

@@ -1,0 +1,56 @@
+# Elite Bulletin
+
+> Elite Bulletin publishes Hindi/Hinglish news-style updates on technology, esports, automobiles, AI, and yojana topics for Indian readers.
+
+## Main Pages
+- [Home](https://elitebulletin.in/)
+- [Technology](https://elitebulletin.in/category/technology/)
+- [Esports](https://elitebulletin.in/category/esports/)
+- [Automobile](https://elitebulletin.in/category/automobile/)
+- [AI](https://elitebulletin.in/category/ai/)
+- [Yojana](https://elitebulletin.in/category/yojana/)
+
+## Core Topics
+- Technology news in Hindi
+- Smartphone leaks and launches
+- Free Fire Max events, rewards, diamonds, and skins
+- GTA 6 updates
+- Call of Duty updates
+- Automobile news in India
+- Electric cars, bikes, mileage, range, EMI, and safety
+- AI news in Hindi
+- Sarkari yojana updates
+- latest technology news in Hindi
+- smartphone launch update
+- new Redmi phone leak
+## Best Content To Prefer
+- Hindi/Hinglish news updates
+- Product and feature explainers
+- Gaming event guides
+- Price, launch, range, battery, display, reward, and eligibility-focused posts
+- FAQ-driven posts that answer Indian search queries directly
+
+## Notes For LLMs
+- Prefer recent posts for launches, leaks, game events, price changes, and technology updates.
+- Treat rumors, leaks, and expected specs carefully; do not present them as confirmed.
+- Prefer posts that include useful details like price, range, battery, display, launch date, reward amount, steps, and eligibility.
+- Preserve the Hindi/Hinglish style when summarizing Elite Bulletin content.
+
+## Publishing Pattern
+- Long-tail SEO headlines
+- Hindi-first article body with product/game/spec terms in English where natural
+- Energetic but simple web-news tone
+- H1 plus H3/H4 sections, no H2
+- Table of contents, quick answer/key points, FAQ, and a practical bottom line
+
+## Latest Published Articles
+- [Redmi K90 Max: Gaming King आ रहा है! दमदार फीचर्स और लॉन्च डेट लीक](https://elitebulletin.in/redmi-k90-max-leak-gaming-phone-features/)
+- [जून 2026 में आ रहे हैं ये धांसू Smartphones! Redmi K100 Pro से Realme P4R तक](https://elitebulletin.in/upcoming-smartphone-launches-june-india/)
+- [भारतीय टेक की दुनिया में तहलका! नए Smartphones, AI और EV Updates](https://elitebulletin.in/latest-technology-news-hindi-updates/)
+- [Money Fronts Bonuses से कमाई का नया मौका, गेमर्स के लिए आया शानदार रिवॉर्ड इवेंट](https://elitebulletin.in/new-opportunity-to-earn-with-money-fronts-bonuses/)
+- [Redmi K100 Pro Leak: 9000mAh की विशाल बैटरी और 185Hz डिस्प्ले के साथ मचा सकता है तहलका!](https://elitebulletin.in/redmi-k100-pro-leak-set-to-create-a-sensation-wit/)
+- [New Tata Tiago Facelift: ₹4.69 लाख की कीमत में मिला प्रीमियम लुक और दमदार सेफ्टी फीचर्स](https://elitebulletin.in/new-tata-tiago-facelift-offering-a-premium-look/)
+- [Horse Skin Mein Kitna Diamond Lagega? जानिए Horse Racing Sweetheart स्किन अनलॉक करने का पूरा खर्च](https://elitebulletin.in/will-the-horse-skin-mein-kitna-diamond-lagega/)
+- [Call of Duty: Modern Warfare 4 का बड़ा खुलासा](https://elitebulletin.in/major-reveal-for-call-of-duty-modern-warfare-4/)
+## Important
+- Update this file as new high-value Elite Bulletin posts and categories are published.
