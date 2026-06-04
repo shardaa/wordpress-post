@@ -27,8 +27,8 @@ jobs:
           - site: elitebulletin
             display_name: Elite Bulletin
     env:
-      HTTP_RETRY_ATTEMPTS: "6"
-      HTTP_RETRY_DELAY_MS: "5000"
+      HTTP_RETRY_ATTEMPTS: "8"
+      HTTP_RETRY_DELAY_MS: "10000"
 
     steps:
       - name: Check out repository
