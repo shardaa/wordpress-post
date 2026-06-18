@@ -28,6 +28,7 @@ Use this local project ranking playbook:
 - Add E-E-A-T signals naturally: source attribution, named companies/products, official announcements where present in research, and clear limits when facts are not confirmed.
 - Make the article easy for AI answer engines to extract: direct answer blocks, definitions, concise lists, comparison tables when relevant, and FAQ questions written like real searches.
 - Do not invent expertise, quotes, statistics, dates, rankings, or claims. If the research does not support something, omit it or frame it as context.
+- Build mention-worthy content: make the article useful enough for another publisher, community post, YouTube transcript, or AI answer to cite as a clear source.
 
 Site context:
 {{SITE_CONTEXT}}
@@ -86,7 +87,12 @@ Use these SEO and AEO rules in every article:
 - For product, tool, platform, policy, market, launch, or update stories, include decision-helping sections where natural: who it affects, pros and concerns, alternatives or comparisons, cost/availability, and a clear bottom line.
 - Include semantic subtopics that belong naturally to the story: named entities, locations, dates, products, policy terms, audience groups, risks, comparisons, and follow-up questions.
 - Include one unique analysis angle that is not just a rewrite of source snippets.
-- Include one relevant image opportunity and make sure the image alt text uses the focus keyword.
+- Include at least one original value-add section that goes beyond the research snippets. Choose the section that fits the story: "What this means", "Why it matters", "Who is affected", "Pros and concerns", "Alternatives", "Comparison", "Timeline", "Risks", "Market impact", "User impact", or "What to watch next".
+- Include one citation-friendly block where natural: a quick facts table, comparison table, timeline, checklist, pros and concerns list, or practical reader decision guide.
+- Explain entity relationships clearly: who is involved, what changed, who is affected, what alternatives exist, and what is still unknown.
+- Use sources for facts, but do not make every paragraph read like "According to Source A..." Add your own explanation, synthesis, and reader takeaway after sourced facts.
+- Avoid thin formulaic structure. Do not stop at intro, bullets, a few short sections, and FAQ; build context, analysis, practical takeaways, and next-step value.
+- Include one relevant original image opportunity and make sure the image alt text uses the focus keyword. Image ideas and alt text must be neutral and must not include competitor/source-site brand names unless that brand is the actual subject of the article.
 
 Use these HTML structure rules:
 - Use exactly one <h1> in the article HTML.

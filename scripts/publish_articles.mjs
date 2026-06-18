@@ -256,7 +256,7 @@ async function main() {
     let wordpressPost = null;
 
     if (!dryRun && getBooleanEnv("AUTO_UPLOAD_IMAGES", true)) {
-      uploadedImages = await uploadImages(images, safeSlug);
+      uploadedImages = await uploadImages(images, safeSlug, article);
       await markUsedImages(uploadedImages);
     }
 
@@ -1433,7 +1433,11 @@ async function generateArticle(topic, research, context = {}) {
       secondaryKeywords: ["keyword 1", "keyword 2", "keyword 3"],
       articleHtml:
         "<h1>Main title</h1><p>Full article HTML with one h1, then h3/h4/h5 sections, detailed explanations, FAQ, and table of contents.</p>",
-      imagePrompts: ["image idea 1", "image idea 2", "image idea 3"],
+      imagePrompts: [
+        "original image idea with neutral alt text using the focus keyword",
+        "original image idea with neutral alt text using the focus keyword",
+        "original image idea with neutral alt text using the focus keyword",
+      ],
     },
     null,
     2,
@@ -1594,6 +1598,8 @@ async function buildArticlePromptPayload({
       "Add context, why it matters, who is affected, and what to watch next.",
       "Prefer a specific, entity-led title over generic news phrasing.",
       "Make the article meaningfully better than a source summary.",
+      "Do not make every paragraph source-led. Use sources for facts, then add synthesis, implications, and reader takeaways.",
+      "Avoid thin formulaic structure. Do not stop at intro, bullets, a few short sections, and FAQ.",
     ],
     seo_requirements: {
       min_words_after_stripping_html: minWords,
@@ -1627,6 +1633,13 @@ async function buildArticlePromptPayload({
         "For decision topics, add a quick verdict or bottom line near the top.",
         "Use question-style FAQ headings.",
       ],
+      original_value_rules: [
+        "Include at least one original value-add section that goes beyond the research snippets.",
+        "Good value-add sections include: What this means, Why it matters, Who is affected, Should you buy or wait, Pros and concerns, Alternatives, Comparison, Timeline, Risks, Market impact, User impact, or What to watch next.",
+        "Include one citation-friendly block where natural: a quick facts table, comparison table, timeline, checklist, pros and cons list, or practical decision guide.",
+        "Explain entity relationships clearly: who made it, what changed, who is affected, what alternatives exist, and what is still unknown.",
+        "Make the article mention-worthy enough for another site, community discussion, video transcript, or AI answer to cite.",
+      ],
       topical_authority_rules: [
         "Group similar keyword variants into one article angle rather than duplicating the same intent.",
         "Cover adjacent subtopics that belong on this page so it can rank for multiple related queries.",
@@ -1654,6 +1667,10 @@ async function buildArticlePromptPayload({
     image_requirements: {
       image_prompt_count: 3,
       image_alt_should_use_focus_keyword: true,
+      require_original_visual_concepts: true,
+      disallow_competitor_or_source_brand_names_in_alt_text: true,
+      alt_text_rule:
+        "Use neutral descriptive alt text. Do not include competitor/source-site names unless that brand is the actual article subject.",
     },
     reference_prompt: promptTemplate,
   };
@@ -2607,6 +2624,16 @@ function getSeoQualityIssues({
   if (!/<h3\b[^>]*>[\s\S]*?(faq|frequently asked questions)/i.test(html)) {
     issues.push("Missing FAQ section.");
   }
+  if (!hasOriginalValueAddSection(html)) {
+    issues.push(
+      "Missing original value-add section such as what this means, why it matters, risks, comparison, market impact, user impact, or what to watch next.",
+    );
+  }
+  if (!hasCitationFriendlyBlock(html)) {
+    issues.push(
+      "Missing citation-friendly block such as a table, timeline, checklist, pros/cons list, quick facts, comparison, or decision guide.",
+    );
+  }
   if (!/<a\s+[^>]*href=["']https?:\/\//i.test(html)) {
     issues.push("Missing crawlable external or internal links.");
   }
@@ -2633,6 +2660,35 @@ function hasGenericTitlePrefix(title) {
 
 function genericTitlePrefixPattern() {
   return /^(us news today|us trending news|us news update|breaking news|latest news|trending news)(?:\s*[:\-–—]\s*|\s+)/i;
+}
+
+function hasOriginalValueAddSection(html) {
+  const headings = [
+    ...String(html || "").matchAll(/<h[3-5]\b[^>]*>([\s\S]*?)<\/h[3-5]>/gi),
+  ].map((match) => stripHtml(match[1]).toLowerCase());
+
+  return headings.some((heading) =>
+    /\b(what this means|why it matters|who is affected|should you|buy or wait|worth it|pros and concerns|pros and cons|alternatives?|comparison|compare|timeline|risks?|market impact|user impact|reader impact|what to watch next|bottom line|quick verdict|decision guide)\b/i.test(
+      heading,
+    ),
+  );
+}
+
+function hasCitationFriendlyBlock(html) {
+  const source = String(html || "");
+  if (/<table\b/i.test(source)) return true;
+
+  const lowerText = stripHtml(source).toLowerCase();
+  if (
+    /\b(timeline|checklist|quick facts|key takeaways|pros and cons|pros and concerns|comparison|compare|decision guide|at a glance)\b/i.test(
+      lowerText,
+    )
+  ) {
+    return true;
+  }
+
+  const listItems = source.match(/<li\b[\s\S]*?<\/li>/gi) || [];
+  return listItems.length >= 4;
 }
 
 function splitSectionsByHeading(articleHtml) {
@@ -2687,7 +2743,7 @@ function isUtilityHeading(headingText) {
   ].includes(normalized);
 }
 
-async function uploadImages(images, slug) {
+async function uploadImages(images, slug, article = {}) {
   const uploads = [];
   const desiredUploads = Number(process.env.IMAGES_PER_POST || 1);
   const selectedImages = images.slice(0, Number(process.env.IMAGE_UPLOAD_ATTEMPTS || 5));
@@ -2712,7 +2768,7 @@ async function uploadImages(images, slug) {
         filename,
         contentType,
         buffer,
-        altText: image.title,
+        altText: buildNeutralImageAltText(article, image),
       });
       uploads.push({
         ...uploaded,
@@ -2724,6 +2780,22 @@ async function uploadImages(images, slug) {
     }
   }
   return uploads;
+}
+
+function buildNeutralImageAltText(article = {}, image = {}) {
+  const candidates = [
+    article.focusKeyword,
+    article.title,
+    image.source === "local" ? image.title : "",
+  ];
+  const raw =
+    candidates.find((candidate) => String(candidate || "").trim()) ||
+    "Article image";
+  return stripHtml(raw)
+    .replace(/[|]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, Number(process.env.IMAGE_ALT_MAX_CHARS || 120));
 }
 
 async function uploadWordPressMedia({

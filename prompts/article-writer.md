@@ -31,6 +31,7 @@ Use this local project ranking playbook:
 - Add E-E-A-T signals naturally: source attribution, named entities, official information where present in research, and clear limits when facts are uncertain.
 - Make the article easy for AI answer engines to extract: direct answers, concise lists, tables, and FAQ questions written like real searches.
 - Do not invent expertise, quotes, statistics, dates, rankings, or claims. If the research does not support something, omit it or frame it as context.
+- Build mention-worthy content: make the article useful enough for another publisher, community post, YouTube transcript, or AI answer to cite as a clear source.
 
 Site context:
 {{SITE_CONTEXT}}
@@ -92,9 +93,14 @@ Follow these SEO and AEO rules in every article:
 - Include semantic subtopics that belong naturally to the page: common variants, synonyms, entities, features, problems, audience segments, scenarios, and questions.
 - Include one unique analysis angle that makes the article more useful than a basic source summary.
 - Include a "quick answer" or "key takeaways" section near the top.
+- Include at least one original value-add section that goes beyond the research snippets. Choose the section that fits the topic: "What this means", "Why it matters", "Should you buy or wait?", "Pros and concerns", "Alternatives", "Comparison", "Timeline", "Risks", "Market impact", "User impact", or "What to watch next".
+- Include one citation-friendly block where natural: a comparison table, quick facts table, timeline, checklist, pros and cons list, or practical decision guide.
+- Explain entity relationships clearly: who made it, what changed, who is affected, what alternatives exist, and what is still unknown.
+- Use sources for facts, but do not make every paragraph read like "According to Source A..." Add your own explanation, synthesis, and reader takeaway after sourced facts.
+- Avoid thin formulaic structure. Do not stop at intro, bullets, a few short sections, and FAQ; build context, analysis, practical takeaways, and next-step value.
 - Keep language simple, helpful, and voice-search friendly.
 - Use short and concise paragraphs for better readability and UX.
-- Include one relevant image opportunity and make sure the image alt text uses the focus keyword.
+- Include one relevant original image opportunity and make sure the image alt text uses the focus keyword. Image ideas and alt text must be neutral and must not include competitor/source-site brand names unless that brand is the actual subject of the article.
 - Make the article feel suitable for WordPress SEO plugins and future schema enhancement such as FAQ, Article, and HowTo where relevant.
 
 Topic:
