@@ -40,8 +40,8 @@ Approved internal links:
 {{INTERNAL_LINKS}}
 
 Use exactly one <h1> in the entire article.
-Do not use any <h2> tags.
-Use only <h3>, <h4>, and <h5> for section headings after the single <h1>.
+Use <h2> for main article sections after the single <h1>.
+Use <h3>, <h4>, and <h5> only for subsections inside those main sections.
 Keep headings reasonably short and specific.
 Every heading must be followed by substantial explanation. Do not create thin sections with a long heading and only one brief sentence.
 Each major section should have depth, examples, and practical detail before moving to the next heading.
@@ -78,15 +78,20 @@ Follow these SEO and AEO rules in every article:
 - Use the focus keyword in some subheadings such as H3, H4, or H5 where relevant.
 - Do not chase exact keyword density. Use natural semantic coverage; repeat the focus keyword only where it helps clarity.
 - Answer the core question early and clearly.
+- Add a <h2>Quick Answer</h2> section immediately after the opening paragraph or table of contents. In 1-2 concise sentences, answer the main search query directly enough that Google AI Overview or another answer engine could quote it with context.
+- Start every major <h2> section with the bottom line first, then add background, examples, caveats, and source support.
+- Make each major section atomic and self-contained. If a reader or AI system extracts only that section, it should still make sense.
 - Add a "quick verdict" or "bottom line" near the top for product, tool, service, platform, buying, download, comparison, or review topics.
 - Add concise definitions, direct answers, and scannable sections.
 - Include a table of contents near the top.
-- Include a strong FAQ section with useful question-style queries. Format it as <h3>FAQ</h3> followed by question-style <h4> headings and concise <p> answers.
+- Include a strong FAQ section with useful question-style queries from search intent and People Also Ask-style wording. Format it as <h2>FAQ</h2> followed by question-style <h3> headings and concise <p> answers.
 - Add 2-4 internal links in the content using only the approved internal links. Use descriptive anchor text and do not use placeholder URLs.
 - Use internal links to connect the article to related topical-cluster pages. Avoid orphan-page behavior by making at least one relevant internal link feel contextually useful.
 - Link out to relevant external resources.
+- Add source links for facts, numbers, dates, official claims, and percentages. Do not make unsupported percentage or ranking claims.
 - External links should be standard crawlable links, not nofollow-only filler.
 - Support AEO with answer-first formatting, short explanatory paragraphs, lists, and clear subsection labels.
+- Use simple declarative sentences. Keep one main idea per sentence where possible.
 - Write sections that are rich enough to satisfy long-form SEO content depth, not thin filler.
 - Prefer practical examples, steps, checklists, comparisons, and use cases.
 - For decision topics, include the sections that fit naturally: who it is best for, key features, pros and cons, alternatives or comparisons, pricing/cost/availability, risks or limitations, and whether it is worth it.
@@ -95,6 +100,7 @@ Follow these SEO and AEO rules in every article:
 - Include a "quick answer" or "key takeaways" section near the top.
 - Include at least one original value-add section that goes beyond the research snippets. Choose the section that fits the topic: "What this means", "Why it matters", "Should you buy or wait?", "Pros and concerns", "Alternatives", "Comparison", "Timeline", "Risks", "Market impact", "User impact", or "What to watch next".
 - Include one citation-friendly block where natural: a comparison table, quick facts table, timeline, checklist, pros and cons list, or practical decision guide.
+- Include one "freshness check" where relevant: what has changed, what is newly updated, what is still uncertain, or what readers should verify next.
 - Explain entity relationships clearly: who made it, what changed, who is affected, what alternatives exist, and what is still unknown.
 - Use sources for facts, but do not make every paragraph read like "According to Source A..." Add your own explanation, synthesis, and reader takeaway after sourced facts.
 - Avoid thin formulaic structure. Do not stop at intro, bullets, a few short sections, and FAQ; build context, analysis, practical takeaways, and next-step value.

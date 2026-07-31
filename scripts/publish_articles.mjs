@@ -1432,7 +1432,7 @@ async function generateArticle(topic, research, context = {}) {
       focusKeyword: "main keyword",
       secondaryKeywords: ["keyword 1", "keyword 2", "keyword 3"],
       articleHtml:
-        "<h1>Main title</h1><p>Full article HTML with one h1, then h3/h4/h5 sections, detailed explanations, FAQ, and table of contents.</p>",
+        "<h1>Main title</h1><p>Full article HTML with one h1, h2 main sections, h3/h4 subsections, quick answer, FAQ, and table of contents.</p>",
       imagePrompts: [
         "original image idea with neutral alt text using the focus keyword",
         "original image idea with neutral alt text using the focus keyword",
@@ -1591,6 +1591,9 @@ async function buildArticlePromptPayload({
       "Do not invent quotes, dates, figures, rankings, or unsupported claims.",
       "Lead with the most important update first.",
       "Put the direct answer or key update in the first 2 paragraphs.",
+      "Add a Quick Answer or Quick Facts section near the top with a 1-2 sentence direct answer to the main query.",
+      "Start each major h2 section with the bottom line first, then add context, caveats, examples, and source support.",
+      "Make each major section atomic and self-contained enough to work as an answer-engine excerpt.",
       "Write for the full modern search journey: curiosity, validation, comparison, and confirmation.",
       "Write semantically around the full topic, not by repeating one exact keyword.",
       "Use the provided research to infer a competitor-style outline, then improve it with clearer structure, better examples, and stronger next-step value.",
@@ -1630,13 +1633,16 @@ async function buildArticlePromptPayload({
         "Answer-first formatting.",
         "Scannable sections and concise lists.",
         "Add quick facts, key takeaways, or quick answer near the top.",
+        "Use a dedicated Quick Answer section near the top for AI Overview extraction.",
         "For decision topics, add a quick verdict or bottom line near the top.",
+        "Use simple declarative sentences and one main idea per sentence where possible.",
         "Use question-style FAQ headings.",
       ],
       original_value_rules: [
         "Include at least one original value-add section that goes beyond the research snippets.",
         "Good value-add sections include: What this means, Why it matters, Who is affected, Should you buy or wait, Pros and concerns, Alternatives, Comparison, Timeline, Risks, Market impact, User impact, or What to watch next.",
         "Include one citation-friendly block where natural: a quick facts table, comparison table, timeline, checklist, pros and cons list, or practical decision guide.",
+        "Include one freshness check where relevant: what changed, what is newly updated, what is still uncertain, or what readers should verify next.",
         "Explain entity relationships clearly: who made it, what changed, who is affected, what alternatives exist, and what is still unknown.",
         "Make the article mention-worthy enough for another site, community discussion, video transcript, or AI answer to cite.",
       ],
@@ -1649,8 +1655,9 @@ async function buildArticlePromptPayload({
     },
     html_rules: {
       exactly_one_h1: true,
-      allowed_heading_tags_after_h1: ["h3", "h4", "h5"],
-      disallow_h2: true,
+      use_h2_for_main_sections: true,
+      allowed_heading_tags_after_h1: ["h2", "h3", "h4", "h5"],
+      faq_format: "<h2>FAQ</h2> with question-style <h3> headings",
       keep_headings_reasonably_short: true,
     },
     validation: {
@@ -1912,7 +1919,8 @@ async function maybeCopyEditArticle(article, topic, research, context = {}) {
     "Improve the title, meta description, opening clarity, section usefulness, FAQ answers, and internal-link fit where needed.",
     "Preserve the modern search strategy: answer early, add validation, support comparison where relevant, and keep decision-helping sections such as quick verdict, pros and cons, alternatives, pricing, or what to watch next when they fit the topic.",
     "Preserve semantic SEO quality: cover the full topic, remove duplicate intent, add natural related terms where useful, and avoid exact-match keyword stuffing.",
-    "Keep exactly one h1. Do not use h2 tags. Keep the article between 600 and 2500 words.",
+    "Keep exactly one h1. Use h2 for main sections and h3/h4/h5 for subsections. Keep the article between 600 and 2500 words.",
+    "Keep or add a near-top Quick Answer or Quick Facts section with a direct 1-2 sentence answer.",
     "Return only valid JSON with the same keys as the original article object.",
     "",
     `Topic: ${topic}`,
@@ -1990,8 +1998,9 @@ async function expandShortArticle(
         ),
         max_words_after_stripping_html: Number(process.env.MAX_ARTICLE_WORDS || 2500),
         exactly_one_h1: true,
-        disallow_h2: true,
-        allowed_heading_tags_after_h1: ["h3", "h4", "h5"],
+        use_h2_for_main_sections: true,
+        allowed_heading_tags_after_h1: ["h2", "h3", "h4", "h5"],
+        faq_format: "<h2>FAQ</h2> with question-style <h3> headings",
         must_expand_with: [
           "more concrete context",
           "why it matters",
@@ -1999,6 +2008,7 @@ async function expandShortArticle(
           "what to watch next",
           "FAQ answers",
           "quick facts or key takeaways",
+          "a direct Quick Answer near the top",
         ],
       },
       article_json: article,
@@ -2365,8 +2375,6 @@ function normalizeArticleStructure(article, topic, research = []) {
     normalized.title || sanitizeGeneratedTitle(topic, topic, research);
   let html = String(normalized.articleHtml || "").trim();
 
-  html = html.replace(/<h2(\b[^>]*)>/gi, "<h3$1>");
-  html = html.replace(/<\/h2>/gi, "</h3>");
   html = html.replace(/<h6(\b[^>]*)>/gi, "<h5$1>");
   html = html.replace(/<\/h6>/gi, "</h5>");
 
@@ -2519,19 +2527,34 @@ function validateArticleStructure(articleHtml) {
   const maxWords = Number(process.env.MAX_ARTICLE_WORDS || 2500);
   const minWordGrace = Number(process.env.MIN_ARTICLE_WORDS_GRACE || 25);
   const h1Count = (articleHtml.match(/<h1\b/gi) || []).length;
-  const h2Count = (articleHtml.match(/<h2\b/gi) || []).length;
 
   if (h1Count !== 1) return `expected exactly 1 h1, got ${h1Count}`;
-  if (h2Count !== 0) return `expected 0 h2 tags, got ${h2Count}`;
   if (wordCount < Math.max(0, minWords - minWordGrace))
     return `expected at least ${minWords} words, got ${wordCount}`;
   if (wordCount > maxWords)
     return `expected at most ${maxWords} words, got ${wordCount}`;
 
   const sections = splitSectionsByHeading(articleHtml);
+  const nonH1Sections = sections.filter((section) => !/^h1$/i.test(section.tag));
+  if (!nonH1Sections.some((section) => /^h2$/i.test(section.tag))) {
+    return "expected at least one h2 main section after h1";
+  }
+
+  const firstNonH1 = nonH1Sections[0];
+  if (firstNonH1 && !/^h2$/i.test(firstNonH1.tag)) {
+    return `first heading after h1 should be h2, got ${firstNonH1.tag.toLowerCase()}`;
+  }
+
+  let previousLevel = 1;
   for (const section of sections) {
+    const level = headingLevel(section.tag);
+    if (level > previousLevel + 1) {
+      return `heading hierarchy jumps from h${previousLevel} to ${section.tag.toLowerCase()}`;
+    }
+    previousLevel = level;
+
     const headingText = stripHtml(section.heading).replace(/\s+/g, " ").trim();
-    if (/^h[3-5]$/i.test(section.tag)) {
+    if (/^h[2-5]$/i.test(section.tag)) {
       if (isUtilityHeading(headingText)) {
         continue;
       }
@@ -2542,6 +2565,10 @@ function validateArticleStructure(articleHtml) {
   }
 
   return null;
+}
+
+function headingLevel(tag) {
+  return Number(String(tag || "").replace(/[^0-9]/g, "")) || 0;
 }
 
 function runSeoQualityGate({
@@ -2618,10 +2645,13 @@ function getSeoQualityIssues({
     issues.push("Missing focus keyword.");
   }
 
-  if (!/<h3\b[^>]*>[\s\S]*?(table of contents|key takeaways|quick facts|quick answer)/i.test(html)) {
-    issues.push("Missing table of contents, quick answer, quick facts, or key takeaways section.");
+  if (!hasHeadingMatching(html, /\b(table of contents|contents)\b/i)) {
+    issues.push("Missing table of contents section.");
   }
-  if (!/<h3\b[^>]*>[\s\S]*?(faq|frequently asked questions)/i.test(html)) {
+  if (!hasHeadingMatching(html, /\b(quick answer|quick facts|key takeaways|bottom line|quick verdict)\b/i)) {
+    issues.push("Missing quick answer, quick facts, key takeaways, bottom line, or quick verdict section.");
+  }
+  if (!hasHeadingMatching(html, /\b(faq|frequently asked questions)\b/i)) {
     issues.push("Missing FAQ section.");
   }
   if (!hasOriginalValueAddSection(html)) {
@@ -2664,7 +2694,7 @@ function genericTitlePrefixPattern() {
 
 function hasOriginalValueAddSection(html) {
   const headings = [
-    ...String(html || "").matchAll(/<h[3-5]\b[^>]*>([\s\S]*?)<\/h[3-5]>/gi),
+    ...String(html || "").matchAll(/<h[2-5]\b[^>]*>([\s\S]*?)<\/h[2-5]>/gi),
   ].map((match) => stripHtml(match[1]).toLowerCase());
 
   return headings.some((heading) =>
@@ -2672,6 +2702,12 @@ function hasOriginalValueAddSection(html) {
       heading,
     ),
   );
+}
+
+function hasHeadingMatching(html, pattern) {
+  return [
+    ...String(html || "").matchAll(/<h[2-5]\b[^>]*>([\s\S]*?)<\/h[2-5]>/gi),
+  ].some((match) => pattern.test(stripHtml(match[1])));
 }
 
 function hasCitationFriendlyBlock(html) {
@@ -2934,7 +2970,7 @@ function addRelatedInternalLinks(articleHtml, internalLinks) {
     )
     .join("");
 
-  return `${articleHtml}\n\n<h3>Related Reading</h3>\n<ul>${items}</ul>`;
+  return `${articleHtml}\n\n<h2>Related Reading</h2>\n<ul>${items}</ul>`;
 }
 
 function selectUsefulInternalLinks(articleHtml, internalLinks) {
@@ -3126,14 +3162,16 @@ function buildFaqJsonLd(articleHtml) {
 
 function extractFaqs(articleHtml) {
   const html = String(articleHtml || "");
-  const headingPattern = /<(h[3-5])\b[^>]*>([\s\S]*?)<\/\1>/gi;
+  const headingPattern = /<(h[2-5])\b[^>]*>([\s\S]*?)<\/\1>/gi;
   const headings = [...html.matchAll(headingPattern)];
   const faqs = [];
   let inFaq = false;
+  let faqLevel = 0;
 
   for (let index = 0; index < headings.length; index += 1) {
     const current = headings[index];
     const tag = current[1].toLowerCase();
+    const level = headingLevel(tag);
     const headingText = stripHtml(current[2]);
     const headingStart = current.index ?? 0;
     const bodyStart = headingStart + current[0].length;
@@ -3145,10 +3183,11 @@ function extractFaqs(articleHtml) {
 
     if (/^(faq|faqs|frequently asked questions)$/i.test(headingText)) {
       inFaq = true;
+      faqLevel = level;
       continue;
     }
 
-    if (inFaq && tag === "h3") {
+    if (inFaq && level <= faqLevel) {
       break;
     }
 

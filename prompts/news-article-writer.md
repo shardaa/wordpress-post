@@ -41,6 +41,9 @@ Use these editorial rules in every article:
 - Lead with the most important update first.
 - Surface what changed, why it matters, who it affects, and what readers should watch next.
 - Put the direct answer or key news update in the first 2 paragraphs.
+- Add a short <h2>Quick Answer</h2> or <h2>Quick Facts</h2> section near the top that answers the core query in 1-2 direct sentences or a compact fact list.
+- Start every major <h2> section with the bottom line first, then add source-backed context, caveats, and implications.
+- Make each major section atomic and self-contained so it can work as an AI Overview or answer-engine excerpt.
 - Keep the tone sharp, factual, current, and readable.
 - Use short paragraphs and clean transitions.
 - Prefer recent developments, launches, updates, statements, releases, and market impact.
@@ -78,17 +81,20 @@ Use these SEO and AEO rules in every article:
 - Prefer a meaningful number in the title when it fits naturally.
 - Keep the URL slug short, readable, and keyword-relevant.
 - Include a table of contents near the top.
-- Include a FAQ section if it fits the topic naturally. Format it as <h3>FAQ</h3> followed by question-style <h4> headings and concise <p> answers.
+- Include a FAQ section if it fits the topic naturally. Format it as <h2>FAQ</h2> followed by question-style <h3> headings and concise <p> answers.
 - Add 2-4 internal links in the content using only the approved internal links. Use descriptive anchor text and do not use placeholder URLs.
 - Use internal links to connect the story to related topical-cluster pages and avoid orphan-page behavior.
 - Link out to relevant external resources naturally in the article body.
+- Add source links for facts, numbers, dates, official claims, and percentages. Do not make unsupported percentage or ranking claims.
 - Support AEO with answer-first formatting, concise definitions, short explanatory paragraphs, lists, and clearly labeled sections.
+- Use simple declarative sentences. Keep one main idea per sentence where possible.
 - Include at least one "quick facts" or "key takeaways" section when the topic is news or a product/model update.
 - For product, tool, platform, policy, market, launch, or update stories, include decision-helping sections where natural: who it affects, pros and concerns, alternatives or comparisons, cost/availability, and a clear bottom line.
 - Include semantic subtopics that belong naturally to the story: named entities, locations, dates, products, policy terms, audience groups, risks, comparisons, and follow-up questions.
 - Include one unique analysis angle that is not just a rewrite of source snippets.
 - Include at least one original value-add section that goes beyond the research snippets. Choose the section that fits the story: "What this means", "Why it matters", "Who is affected", "Pros and concerns", "Alternatives", "Comparison", "Timeline", "Risks", "Market impact", "User impact", or "What to watch next".
 - Include one citation-friendly block where natural: a quick facts table, comparison table, timeline, checklist, pros and concerns list, or practical reader decision guide.
+- Include one freshness check where relevant: what is newly changed, what is confirmed, what is still unknown, and what readers should watch next.
 - Explain entity relationships clearly: who is involved, what changed, who is affected, what alternatives exist, and what is still unknown.
 - Use sources for facts, but do not make every paragraph read like "According to Source A..." Add your own explanation, synthesis, and reader takeaway after sourced facts.
 - Avoid thin formulaic structure. Do not stop at intro, bullets, a few short sections, and FAQ; build context, analysis, practical takeaways, and next-step value.
@@ -96,8 +102,8 @@ Use these SEO and AEO rules in every article:
 
 Use these HTML structure rules:
 - Use exactly one <h1> in the article HTML.
-- Do not use any <h2> tags.
-- Use only <h3>, <h4>, and <h5> after the single <h1>.
+- Use <h2> for main sections after the single <h1>.
+- Use <h3>, <h4>, and <h5> only for subsections inside those main sections.
 - Keep headings reasonably short and specific.
 
 Topic:
