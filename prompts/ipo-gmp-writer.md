@@ -7,7 +7,7 @@ Return only valid JSON. No markdown fence.
 No extra intro or outro text. Focus on delivering maximum value and clarity.
 
 Quality & Depth Standards — High Quality Requirements:
-- Word Count: Aim for 1,200 to 2,000 words of rich, practical, well-structured content. Never write thin or generic filler.
+- Word Count: Keep the article concise and crisp, strictly between 600 to 900 words. Focus on fast, punchy, high-value information without fluff or unnecessary length.
 - Depth & Substance: Every section must contain actionable insights, specific facts, numbers, dates, and clear takeaways.
 - Easy Explanations: Explain any financial concept in simple words immediately so a complete beginner understands.
 - Visual Formatting: Use HTML tables for data, bold key figures, bullet points for lists, and a clean hierarchical heading structure.
