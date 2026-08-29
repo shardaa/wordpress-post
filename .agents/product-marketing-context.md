@@ -78,48 +78,50 @@ This file is local to this WordPress auto-publisher. It gives the article genera
 
 ## EliteBulletin
 
-**One-liner:** Elite Bulletin publishes simple, easy-to-read English articles on technology, gaming, automobiles, AI, and IPO GMP analysis for Indian readers.
+**One-liner:** Elite Bulletin is a simple, beginner-friendly guide to IPO investing, GMP analysis, and the Indian share market — written in plain English for everyday investors.
 
-**Primary audience:** Indian readers who want clear, simple updates about phones, games, cars, bikes, EVs, AI tools, and IPO investing. Many readers are first-time investors or beginners.
+**Primary audience:** Indian retail investors — beginners and first-time investors — who want simple, clear explanations of IPO GMP, share market basics, allotment status, listing predictions, and investment decisions.
 
 **Content focus:**
-- Smartphone leaks, launches, specs, prices, and feature explainers in plain English
-- Gaming updates — Free Fire, GTA, Call of Duty, events, rewards, and tips
-- Automobile news — cars, bikes, EVs, prices, mileage, and features
-- AI and technology news in simple, everyday English
-- IPO GMP (Grey Market Premium) analysis for retail investors — GMP today, listing price prediction, apply or skip verdict, allotment status, subscription data
+- IPO GMP (Grey Market Premium) analysis — GMP today, what it means, listing price prediction, apply or skip verdict
+- IPO allotment status — how to check, what to do if not allotted, refund timeline
+- IPO subscription data — what oversubscription means, day-by-day status
+- Share market basics — explained simply for people new to investing
+- Demat account, UPI application, cutoff price, lot size — all explained in plain words
+- Upcoming IPO calendar — what is opening this week, what to watch
 
-**Tone:** Simple, clear, friendly English. No jargon. No complex financial or technical words. Write like you are explaining to a friend. Short sentences. Short paragraphs. Easy to read on a phone. Always accurate — never make up facts.
+**Tone:** Simple, plain, friendly English. No financial jargon. No complex words. Write like you are explaining to a friend who has never invested before. Short sentences. Short paragraphs. Direct answers first. Always accurate — never make up GMP figures or financial data.
 
-**Language rules for all content:**
-- Use simple words. Avoid: robust, leverage, holistic, paradigm, utilize, facilitate, aforementioned, commenced.
-- If a technical term is needed, explain it immediately in plain words.
+**Language rules — strictly follow these:**
+- Simple words only. Replace hard words with easy ones.
+- Banned words: robust, leverage, holistic, paradigm, utilize, facilitate, aforementioned, commenced, endeavor, pursuant, aforementioned.
+- If any financial term must be used, explain it in one plain sentence immediately after.
 - One idea per sentence. Two to three sentences per paragraph.
-- Active voice. Direct answers first.
+- Active voice always. Answer the main question in the first two sentences.
 
 **What readers want:**
-- What is new and why does it matter
-- Price, launch date, features, or eligibility details explained simply
-- Rumor vs confirmed — be clear about which is which
-- For IPO: What is the GMP today, should I apply, when is listing, how to check allotment
+- What is the GMP today for this IPO?
+- Should I apply for this IPO or skip it?
+- When is the listing date and what price will it list at?
+- How do I check if I got the allotment?
+- What does oversubscribed mean?
+- How does the share market work — simple explanation
 
 **Topics to own:**
-- Latest technology news simple English
-- Free Fire Max events and rewards
-- GTA 6 and gaming updates
-- Smartphone leaks and launches India
-- Electric car and automobile updates India
-- AI news explained simply
-- IPO GMP today analysis
+- IPO GMP today
 - IPO listing price prediction
 - IPO allotment status check
-- Upcoming IPO India this week
 - Should I apply for this IPO
+- Upcoming IPO this week India
+- Share market basics for beginners
+- How to apply for IPO using UPI
+- What is grey market premium
+- SME IPO vs mainboard IPO explained
+- How to open demat account
 
 **Internal link priorities:**
-- Technology news
-- Gaming updates
-- Automobile updates
-- AI news
-- IPO GMP analysis
+- IPO GMP today
 - IPO allotment guide
+- Share market basics
+- Upcoming IPO India
+- IPO subscription status

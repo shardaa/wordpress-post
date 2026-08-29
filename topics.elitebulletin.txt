@@ -1,26 +1,33 @@
-# Elite Bulletin topics
-# --- General Tech & Entertainment ---
-latest technology news in Hindi
-smartphone launch update
-new Redmi phone leak
-Free Fire Max event
-Free Fire diamonds update
-GTA 6 update
-Call of Duty update
-new electric car India
-latest automobile news India
-new bike launch India
-AI news in Hindi
-sarkari yojana update
+# EliteBulletin — IPO, GMP & Share Market topics only
 
-# --- IPO & GMP topics ---
-IPO GMP kya hota hai Hindi mein samjhain
-Grey Market Premium kaise kaam karta hai
-IPO mein invest kaise kare beginners guide Hindi
-upcoming IPO this week India 2026
-best IPO to apply this week Hindi
-SME IPO GMP today analysis Hindi
-IPO allotment kaise check kare step by step
-IPO listing gains kaise milte hain
-mainboard IPO vs SME IPO difference Hindi
-IPO subscription status kaise dekhein
+# --- IPO GMP Explainers (evergreen) ---
+what is IPO GMP explained simply
+how grey market premium works for beginners
+is GMP reliable for predicting IPO listing price
+how to check IPO allotment status online
+how to apply for IPO using UPI step by step
+what happens if IPO is oversubscribed
+difference between mainboard IPO and SME IPO
+what is IPO subscription status and what does it mean
+how to read IPO subscription data day by day
+what is cutoff price in IPO and should you use it
+
+# --- Share Market Basics (evergreen) ---
+how does the stock market work for beginners
+what is NSE and BSE difference explained simply
+how to open a demat account step by step
+what is a share and how does buying shares work
+how to read a stock price chart for beginners
+what is market cap and why does it matter
+difference between large cap mid cap and small cap stocks
+what is dividend and how do investors earn from it
+how to check if a company is good before investing
+what is PE ratio and how to use it simply
+
+# --- IPO Season Topics (refreshed by auto-fetcher) ---
+upcoming IPO this week India
+best IPO to apply this week
+SME IPO GMP today
+IPO listing today India result
+IPO allotment result today
+new IPO open today India
