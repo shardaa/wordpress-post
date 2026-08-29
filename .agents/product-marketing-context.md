@@ -78,47 +78,48 @@ This file is local to this WordPress auto-publisher. It gives the article genera
 
 ## EliteBulletin
 
-**One-liner:** Elite Bulletin publishes Hindi/Hinglish viral-style news updates on technology, esports, automobiles, AI, IPO GMP analysis, and useful yojana topics for Indian search readers.
+**One-liner:** Elite Bulletin publishes simple, easy-to-read English articles on technology, gaming, automobiles, AI, and IPO GMP analysis for Indian readers.
 
-**Primary audience:** Indian readers who want quick, exciting, easy-to-understand updates about phones, games, cars, bikes, EVs, AI tools, IPO investing, and public-benefit schemes.
+**Primary audience:** Indian readers who want clear, simple updates about phones, games, cars, bikes, EVs, AI tools, and IPO investing. Many readers are first-time investors or beginners.
 
 **Content focus:**
-- Smartphone leaks, launches, specs, price expectations, and feature explainers
-- Esports and gaming updates, especially Free Fire, GTA, Call of Duty, events, rewards, diamonds, skins, and creator opportunities
-- Automobile news around cars, bikes, EVs, facelift models, mileage/range, pricing, EMI, safety, and features
-- AI and technology news written in simple Hindi/Hinglish
-- Yojana updates where the topic is useful for Indian households
-- IPO GMP (Grey Market Premium) analysis in Hindi for retail investors — GMP today, listing price prediction, apply or skip verdict, allotment status, subscription data
+- Smartphone leaks, launches, specs, prices, and feature explainers in plain English
+- Gaming updates — Free Fire, GTA, Call of Duty, events, rewards, and tips
+- Automobile news — cars, bikes, EVs, prices, mileage, and features
+- AI and technology news in simple, everyday English
+- IPO GMP (Grey Market Premium) analysis for retail investors — GMP today, listing price prediction, apply or skip verdict, allotment status, subscription data
 
-**Tone:** Hindi-first, Hinglish-friendly, energetic, mass-market, search-friendly, and easy to read. Keep the same lively Elite Bulletin feel, but do not invent facts. For IPO content, be accurate, investor-friendly, and always include SEBI disclaimer.
+**Tone:** Simple, clear, friendly English. No jargon. No complex financial or technical words. Write like you are explaining to a friend. Short sentences. Short paragraphs. Easy to read on a phone. Always accurate — never make up facts.
+
+**Language rules for all content:**
+- Use simple words. Avoid: robust, leverage, holistic, paradigm, utilize, facilitate, aforementioned, commenced.
+- If a technical term is needed, explain it immediately in plain words.
+- One idea per sentence. Two to three sentences per paragraph.
+- Active voice. Direct answers first.
 
 **What readers want:**
-- Kya naya hai
-- Iska fayda kya hai
-- Price, launch, date, feature, range, reward, or eligibility details
-- Rumor vs confirmed status
-- Simple explanation in everyday Hindi
-- A clickable but accurate headline
-- For IPO: GMP today, listing price prediction, apply/skip verdict, allotment status
+- What is new and why does it matter
+- Price, launch date, features, or eligibility details explained simply
+- Rumor vs confirmed — be clear about which is which
+- For IPO: What is the GMP today, should I apply, when is listing, how to check allotment
 
 **Topics to own:**
-- Latest technology news in Hindi
+- Latest technology news simple English
 - Free Fire Max events and rewards
 - GTA 6 and gaming updates
-- Smartphone leaks and launches
-- Electric car and automobile updates
-- AI news in Hindi
-- Sarkari yojana updates
-- IPO GMP today Hindi analysis
-- IPO listing price prediction Hindi
+- Smartphone leaks and launches India
+- Electric car and automobile updates India
+- AI news explained simply
+- IPO GMP today analysis
+- IPO listing price prediction
 - IPO allotment status check
 - Upcoming IPO India this week
+- Should I apply for this IPO
 
 **Internal link priorities:**
 - Technology news
-- Esports updates
+- Gaming updates
 - Automobile updates
 - AI news
-- Yojana updates
-- IPO news Hindi
-- GMP analysis
+- IPO GMP analysis
+- IPO allotment guide

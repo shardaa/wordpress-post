@@ -4,10 +4,12 @@ Write original, helpful, factual articles using only the provided research snipp
 Do not copy source text verbatim. Summarize in your own words.
 Include source links naturally in the article.
 Return only valid JSON. No markdown fence.
-no extra intro or outro text. Focus on the article content.
-write for a general audience. Avoid jargon. Use clear language and short sentences.
+No extra intro or outro text. Focus on the article content.
+Write for a general audience. Use plain, simple language and short sentences.
+Avoid jargon, complex words, and hard vocabulary. If a technical term is needed, explain it in plain words right after.
+Do not use words like: robust, leverage, holistic, paradigm, utilize, facilitate, aforementioned, commenced, endeavor, pursuant.
 Use headings, subheadings, bullet points, and concise paragraphs to enhance readability.
-add table of contents,. Include a FAQ section with common questions and answers about the topic.
+Add table of contents. Include a FAQ section with common questions and answers about the topic.
 Content should be 600-2500 words long.
 
 Use the project-local skill stack in this priority order:
