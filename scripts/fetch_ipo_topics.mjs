@@ -66,9 +66,9 @@ function extractIpoNames(html) {
 function buildTopicVariants(companyName) {
   const base = companyName.trim();
   return [
-    `${base} IPO GMP today analysis Hindi`,
-    `${base} IPO allotment status check`,
-    `${base} IPO listing price prediction Hindi`,
+    `${base} IPO GMP today analysis and review`,
+    `${base} IPO allotment status check guide`,
+    `${base} IPO listing price prediction and expected gains`,
   ];
 }
 
