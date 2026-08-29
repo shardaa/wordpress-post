@@ -1,4 +1,5 @@
 # Elite Bulletin topics
+# --- General Tech & Entertainment ---
 latest technology news in Hindi
 smartphone launch update
 new Redmi phone leak
@@ -11,3 +12,15 @@ latest automobile news India
 new bike launch India
 AI news in Hindi
 sarkari yojana update
+
+# --- IPO & GMP topics ---
+IPO GMP kya hota hai Hindi mein samjhain
+Grey Market Premium kaise kaam karta hai
+IPO mein invest kaise kare beginners guide Hindi
+upcoming IPO this week India 2026
+best IPO to apply this week Hindi
+SME IPO GMP today analysis Hindi
+IPO allotment kaise check kare step by step
+IPO listing gains kaise milte hain
+mainboard IPO vs SME IPO difference Hindi
+IPO subscription status kaise dekhein

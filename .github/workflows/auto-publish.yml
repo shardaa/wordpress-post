@@ -2,8 +2,9 @@ name: Auto publish WordPress articles
 
 on:
   schedule:
-    # 12 times/day: 01:00, 03:00, 05:00, 07:00, 09:00, 11:00,
-    # 13:00, 15:00, 17:00, 19:00, 21:00, 23:00 USA (GMT-4).
+    # 15 times/day covering peak IST investor search times
+    # (02:30, 04:30, 06:30 IST = 21:00, 23:00, 01:00 UTC prev day)
+    # (08:30, 10:30, 12:30, 14:30, 16:30, 18:30, 20:30, 22:30 IST)
     - cron: "0 1,3,5,7,9,11,13,15,17,19,21,23 * * *"
   workflow_dispatch:
 
@@ -22,10 +23,13 @@ jobs:
         include:
           - site: healingpoint
             display_name: HealingPoint
+            content_mode: ""
           - site: kafirana
             display_name: Kafirana
+            content_mode: "news"
           - site: elitebulletin
             display_name: Elite Bulletin
+            content_mode: ""
     env:
       HTTP_RETRY_ATTEMPTS: "8"
       HTTP_RETRY_DELAY_MS: "10000"
@@ -115,10 +119,16 @@ jobs:
           echo "::add-mask::$key"
           echo "GEMINI_API_KEY=$key" >> "$GITHUB_ENV"
 
+      - name: Fetch fresh IPO topics (EliteBulletin only)
+        if: matrix.site == 'elitebulletin'
+        run: node scripts/fetch_ipo_topics.mjs
+        continue-on-error: true
+
       - name: Publish ${{ matrix.display_name }}
         env:
           BROWSER_HEADLESS: "true"
           RANDOM_TOPIC: "true"
           ARTICLE_LIMIT: "1"
           IMAGE_UPLOAD_ATTEMPTS: "1"
+          CONTENT_MODE: ${{ matrix.content_mode }}
         run: node scripts/publish_articles.mjs --site=${{ matrix.site }} --research=browser

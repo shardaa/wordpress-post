@@ -78,9 +78,9 @@ This file is local to this WordPress auto-publisher. It gives the article genera
 
 ## EliteBulletin
 
-**One-liner:** Elite Bulletin publishes Hindi/Hinglish viral-style news updates on technology, esports, automobiles, AI, and useful yojana topics for Indian search readers.
+**One-liner:** Elite Bulletin publishes Hindi/Hinglish viral-style news updates on technology, esports, automobiles, AI, IPO GMP analysis, and useful yojana topics for Indian search readers.
 
-**Primary audience:** Indian readers who want quick, exciting, easy-to-understand updates about phones, games, cars, bikes, EVs, AI tools, and public-benefit schemes.
+**Primary audience:** Indian readers who want quick, exciting, easy-to-understand updates about phones, games, cars, bikes, EVs, AI tools, IPO investing, and public-benefit schemes.
 
 **Content focus:**
 - Smartphone leaks, launches, specs, price expectations, and feature explainers
@@ -88,8 +88,9 @@ This file is local to this WordPress auto-publisher. It gives the article genera
 - Automobile news around cars, bikes, EVs, facelift models, mileage/range, pricing, EMI, safety, and features
 - AI and technology news written in simple Hindi/Hinglish
 - Yojana updates where the topic is useful for Indian households
+- IPO GMP (Grey Market Premium) analysis in Hindi for retail investors — GMP today, listing price prediction, apply or skip verdict, allotment status, subscription data
 
-**Tone:** Hindi-first, Hinglish-friendly, energetic, mass-market, search-friendly, and easy to read. Keep the same lively Elite Bulletin feel, but do not invent facts.
+**Tone:** Hindi-first, Hinglish-friendly, energetic, mass-market, search-friendly, and easy to read. Keep the same lively Elite Bulletin feel, but do not invent facts. For IPO content, be accurate, investor-friendly, and always include SEBI disclaimer.
 
 **What readers want:**
 - Kya naya hai
@@ -98,6 +99,7 @@ This file is local to this WordPress auto-publisher. It gives the article genera
 - Rumor vs confirmed status
 - Simple explanation in everyday Hindi
 - A clickable but accurate headline
+- For IPO: GMP today, listing price prediction, apply/skip verdict, allotment status
 
 **Topics to own:**
 - Latest technology news in Hindi
@@ -107,6 +109,10 @@ This file is local to this WordPress auto-publisher. It gives the article genera
 - Electric car and automobile updates
 - AI news in Hindi
 - Sarkari yojana updates
+- IPO GMP today Hindi analysis
+- IPO listing price prediction Hindi
+- IPO allotment status check
+- Upcoming IPO India this week
 
 **Internal link priorities:**
 - Technology news
@@ -114,3 +120,5 @@ This file is local to this WordPress auto-publisher. It gives the article genera
 - Automobile updates
 - AI news
 - Yojana updates
+- IPO news Hindi
+- GMP analysis

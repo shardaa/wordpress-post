@@ -23,21 +23,6 @@ function isDnsResolutionFailure(error) {
   );
 }
 
-function formatNetworkError(error) {
-  const message = String(error?.message || error || "unknown error");
-  const causeCode = error?.cause?.code;
-  const causeMessage = error?.cause?.message;
-  const name = error?.name;
-
-  if (name === "AbortError" || /aborted|abort/i.test(message)) {
-    return `request timed out or was aborted (${message})`;
-  }
-  if (causeCode || causeMessage) {
-    return `${message}; cause=${[causeCode, causeMessage].filter(Boolean).join(" ")}`;
-  }
-  return message;
-}
-
 async function fetchWithDnsFallback(url, options = {}) {
   try {
     return await originalFetch(url, options);
@@ -49,47 +34,6 @@ async function fetchWithDnsFallback(url, options = {}) {
       return dnsFetch(url, options);
     }
     throw error;
-  }
-}
-
-async function fetchWithRetry(url, options = {}, label = "request") {
-  const attempts = Number(process.env.HTTP_RETRY_ATTEMPTS || 3);
-  const timeoutMs = Number(options.timeout || 0);
-  let lastError = null;
-
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    try {
-      return await fetchWithTimeout(url, options, timeoutMs);
-    } catch (error) {
-      lastError = error;
-      if (attempt >= attempts) break;
-      const delayMs = Number(process.env.HTTP_RETRY_DELAY_MS || 1500) * attempt;
-      console.warn(
-        `${label} failed on attempt ${attempt}/${attempts}: ${formatNetworkError(error)}. Retrying in ${delayMs}ms.`,
-      );
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-    }
-  }
-
-  throw new Error(
-    `${label} failed after ${attempts} attempt(s): ${formatNetworkError(lastError)}`,
-  );
-}
-
-async function fetchWithTimeout(url, options = {}, timeoutMs = 0) {
-  if (!timeoutMs || timeoutMs <= 0) {
-    return fetch(url, options);
-  }
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, {
-      ...options,
-      signal: options.signal || controller.signal,
-    });
-  } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -230,11 +174,6 @@ async function main() {
     return;
   }
 
-  if (!dryRun) {
-    console.log("Verifying WordPress access...");
-    await verifyWordPressAccess();
-  }
-
   await mkdir(path.join(root, "state"), { recursive: true });
   await writeFile(processedPath, JSON.stringify(processed, null, 2)).catch(
     () => {},
@@ -243,9 +182,7 @@ async function main() {
   for (const topic of selected) {
     console.log(`Researching: ${topic}`);
     const research = await searchWeb(topic, researchMode);
-    console.log("Starting image selection...");
     const images = await searchImages(topic, research, researchMode);
-    console.log("Starting article generation...");
     const article = await generateArticle(topic, research, {
       siteContext,
       internalLinks,
@@ -256,7 +193,7 @@ async function main() {
     let wordpressPost = null;
 
     if (!dryRun && getBooleanEnv("AUTO_UPLOAD_IMAGES", true)) {
-      uploadedImages = await uploadImages(images, safeSlug, article);
+      uploadedImages = await uploadImages(images, safeSlug);
       await markUsedImages(uploadedImages);
     }
 
@@ -323,40 +260,21 @@ async function loadLocalEnv(envPath) {
       if (!trimmed || trimmed.startsWith("#") || !trimmed.includes("="))
         continue;
       const [key, ...valueParts] = trimmed.split("=");
-      const rawValue = valueParts.join("=").trim();
-      const normalized =
-        rawValue.startsWith('"') || rawValue.startsWith("'")
-          ? rawValue.replace(/^["']|["']$/g, "")
-          : rawValue.replace(/\s+#.*$/, "").trim();
-      const value = normalized.startsWith(`${key}=`)
-        ? normalized.slice(key.length + 1)
-        : normalized;
-      if (shouldPreserveRuntimeEnv(key)) continue;
-      process.env[key] = value;
+      if (!process.env[key]) {
+        const rawValue = valueParts.join("=").trim();
+        const normalized =
+          rawValue.startsWith('"') || rawValue.startsWith("'")
+            ? rawValue.replace(/^["']|["']$/g, "")
+            : rawValue.replace(/\s+#.*$/, "").trim();
+        const value = normalized.startsWith(`${key}=`)
+          ? normalized.slice(key.length + 1)
+          : normalized;
+        process.env[key] = value;
+      }
     }
   } catch {
     // .env is optional if shell environment variables are already set.
   }
-}
-
-function shouldPreserveRuntimeEnv(key) {
-  const runtimeOverrideKeys = new Set([
-    "ARTICLE_LIMIT",
-    "RANDOM_TOPIC",
-    "BROWSER_HEADLESS",
-    "RESEARCH_MODE",
-    "SEARCH_ENGINES",
-    "SEARCH_WAIT_MS",
-    "PAGE_WAIT_MS",
-    "SEARCH_PAGE_TIMEOUT_MS",
-    "SOURCE_PAGE_TIMEOUT_MS",
-    "BROWSER_MAX_CANDIDATES",
-    "HTTP_RETRY_ATTEMPTS",
-    "HTTP_RETRY_DELAY_MS",
-    "PORT",
-    "SITE",
-  ]);
-  return runtimeOverrideKeys.has(key) && process.env[key] !== undefined;
 }
 
 async function resolveEnvPath() {
@@ -439,28 +357,11 @@ async function readProcessed(processedPath) {
 
 async function readSiteContext() {
   const contextPath = path.join(root, ".agents", "product-marketing-context.md");
-  const siteRulesPath = selectedSite
-    ? path.join(root, ".agents", `${selectedSite}-style-rules.md`)
-    : "";
   try {
     const fullContext = await readFile(contextPath, "utf8");
     const section = extractMarkdownSection(fullContext, selectedSite);
-    const baseContext = section || fullContext;
-    if (!siteRulesPath) return baseContext;
-    try {
-      const siteRules = await readFile(siteRulesPath, "utf8");
-      return `${baseContext}\n\n${siteRules}`;
-    } catch {
-      return baseContext;
-    }
+    return section || fullContext;
   } catch {
-    if (siteRulesPath) {
-      try {
-        return await readFile(siteRulesPath, "utf8");
-      } catch {
-        return "";
-      }
-    }
     return "";
   }
 }
@@ -498,13 +399,13 @@ function normalizeInternalLinks(links) {
 }
 
 function extractMarkdownSection(markdown, sectionName) {
-  const normalizedSection = normalizeSectionName(sectionName);
+  const normalizedSection = String(sectionName || "").trim().toLowerCase();
   if (!normalizedSection) return "";
 
   const lines = markdown.split(/\r?\n/);
   const start = lines.findIndex((line) => {
     const match = line.match(/^##\s+(.+?)\s*$/);
-    return match && normalizeSectionName(match[1]) === normalizedSection;
+    return match && match[1].trim().toLowerCase() === normalizedSection;
   });
   if (start === -1) return "";
 
@@ -514,13 +415,6 @@ function extractMarkdownSection(markdown, sectionName) {
   }
 
   return lines.slice(start, end).join("\n").trim();
-}
-
-function normalizeSectionName(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "");
 }
 
 async function readFileWithFallback(primaryPath, fallbackPath) {
@@ -574,7 +468,7 @@ async function googleSearch(query, extraParams = {}) {
     );
   }
 
-  const url = new URL("https://customsearch.googleapis.com/customsearch/v1");
+  const url = new URL("https://www.googleapis.com/customsearch/v1");
   url.searchParams.set("key", key);
   url.searchParams.set("cx", cx);
   url.searchParams.set("q", query);
@@ -1086,25 +980,8 @@ function getCuratedSourceUrls(topic) {
     /(new launch in ai|latest ai|ai update|ai news|new ai|new model|new tool|artificial intelligence update|llm update|ai breakthrough)/.test(
       lower,
     );
-  const isEliteStyleTopic =
-    isEliteBulletinSite() ||
-    /(free fire|gta|gaming|esports|smartphone|redmi|realme|samsung|oneplus|vivo|oppo|automobile|car|bike|ev|electric car|yojana|sarkari)/.test(
-      lower,
-    );
 
-  if (isEliteStyleTopic) {
-    add(
-      "https://www.gadgets360.com/news",
-      "https://www.91mobiles.com/hub/",
-      "https://www.smartprix.com/bytes/",
-      "https://www.indiatodaygaming.com/",
-      "https://www.sportskeeda.com/esports",
-      "https://www.autocarindia.com/",
-      "https://www.carandbike.com/news",
-      "https://www.bikedekho.com/news",
-      "https://www.financialexpress.com/auto/",
-    );
-  } else if (isBroadNewsTopic) {
+  if (isBroadNewsTopic) {
     add(
       "https://apnews.com/",
       "https://apnews.com/us-news",
@@ -1199,11 +1076,6 @@ function isRelevantCuratedSummary(summary, topic) {
     /(new launch in ai|latest ai|ai update|ai news|new ai|new model|new tool|artificial intelligence update|llm update|ai breakthrough)/.test(
       topic.toLowerCase(),
     );
-  const eliteStyleTopic =
-    isEliteBulletinSite() ||
-    /(free fire|gta|gaming|esports|smartphone|redmi|realme|samsung|oneplus|vivo|oppo|automobile|car|bike|ev|electric car|yojana|sarkari)/.test(
-      topic.toLowerCase(),
-    );
   const trustedNewsSource =
     /(?:^|\.)apnews\.com$|(?:^|\.)reuters\.com$|(?:^|\.)npr\.org$|(?:^|\.)usatoday\.com$|(?:^|\.)cbsnews\.com$|(?:^|\.)abcnews\.go\.com$|(?:^|\.)nbcnews\.com$|(?:^|\.)politico\.com$|(?:^|\.)axios\.com$/.test(
       String(summary.source || "").toLowerCase(),
@@ -1212,12 +1084,7 @@ function isRelevantCuratedSummary(summary, topic) {
     /(?:^|\.)reuters\.com$|(?:^|\.)techcrunch\.com$|(?:^|\.)theverge\.com$|(?:^|\.)zdnet\.com$|(?:^|\.)openai\.com$|(?:^|\.)blog\.google$|(?:^|\.)deepmind\.google$|(?:^|\.)anthropic\.com$|(?:^|\.)developers\.googleblog\.com$/.test(
       String(summary.source || "").toLowerCase(),
     );
-  const trustedEliteSource =
-    /(?:^|\.)gadgets360\.com$|(?:^|\.)91mobiles\.com$|(?:^|\.)smartprix\.com$|(?:^|\.)indiatodaygaming\.com$|(?:^|\.)sportskeeda\.com$|(?:^|\.)autocarindia\.com$|(?:^|\.)carandbike\.com$|(?:^|\.)bikedekho\.com$|(?:^|\.)financialexpress\.com$/.test(
-      String(summary.source || "").toLowerCase(),
-    );
 
-  if (eliteStyleTopic && trustedEliteSource) return true;
   if (broadNewsTopic && trustedNewsSource) return true;
   if (broadAiTopic && trustedAiSource) return true;
   if (!terms.length) return true;
@@ -1423,7 +1290,6 @@ async function localImagesForTopic(topic) {
 
 async function generateArticle(topic, research, context = {}) {
   const provider = (process.env.AI_PROVIDER || "gemini").toLowerCase();
-  const minWords = Number(process.env.MIN_ARTICLE_WORDS || 600);
   const schema = JSON.stringify(
     {
       title: "SEO title under 65 characters",
@@ -1432,12 +1298,8 @@ async function generateArticle(topic, research, context = {}) {
       focusKeyword: "main keyword",
       secondaryKeywords: ["keyword 1", "keyword 2", "keyword 3"],
       articleHtml:
-        "<h1>Main title</h1><p>Full article HTML with one h1, h2 main sections, h3/h4 subsections, quick answer, FAQ, and table of contents.</p>",
-      imagePrompts: [
-        "original image idea with neutral alt text using the focus keyword",
-        "original image idea with neutral alt text using the focus keyword",
-        "original image idea with neutral alt text using the focus keyword",
-      ],
+        "<h1>Main title</h1><p>Full article HTML with one h1, then h3/h4/h5 sections, detailed explanations, FAQ, and table of contents.</p>",
+      imagePrompts: ["image idea 1", "image idea 2", "image idea 3"],
     },
     null,
     2,
@@ -1448,7 +1310,6 @@ async function generateArticle(topic, research, context = {}) {
   let lastArticle = null;
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    console.log(`Article generation attempt ${attempt}/${attempts}...`);
     const prompt = JSON.stringify(
       await buildArticlePromptPayload({
         topic,
@@ -1457,7 +1318,6 @@ async function generateArticle(topic, research, context = {}) {
         context,
         attempt,
         previousValidationError: lastError,
-        minWords,
       }),
       null,
       2,
@@ -1490,27 +1350,6 @@ async function generateArticle(topic, research, context = {}) {
     const validationError = validateArticleStructure(article.articleHtml);
     if (!validationError) {
       return maybeCopyEditArticle(article, topic, research, context);
-    }
-    if (isWordCountValidationError(validationError)) {
-      const expanded = await expandShortArticle(
-        article,
-        topic,
-        research,
-        context,
-        provider,
-        schema,
-        validationError,
-      );
-      lastArticle = expanded;
-      const expandedValidationError = validateArticleStructure(expanded.articleHtml);
-      if (!expandedValidationError) {
-        return maybeCopyEditArticle(expanded, topic, research, context);
-      }
-      lastError = expandedValidationError;
-      console.warn(
-        `Expanded article still failed validation on attempt ${attempt}: ${expandedValidationError}`,
-      );
-      continue;
     }
     lastError = validationError;
     console.warn(
@@ -1547,7 +1386,6 @@ async function buildArticlePromptPayload({
   context,
   attempt,
   previousValidationError,
-  minWords,
 }) {
   const promptTemplate = await renderPromptTemplate(resolvePromptTemplate(), {
     TOPIC: topic,
@@ -1556,21 +1394,19 @@ async function buildArticlePromptPayload({
     SITE_CONTEXT: context.siteContext || "No site context provided.",
     INTERNAL_LINKS: formatInternalLinksForPrompt(context.internalLinks || []),
   });
-  const searchStrategy = buildModernSearchStrategy(topic);
-  const semanticSeoStrategy = buildSemanticSeoStrategy(topic, research);
 
   return {
     task: "Write a WordPress-ready article and return only valid JSON.",
     attempt,
     topic,
     content_mode: (process.env.CONTENT_MODE || "").trim().toLowerCase() || null,
-    audience: getAudienceLabel(),
+    audience: selectedSite.toLowerCase().includes("kafirana")
+      ? "US news audience"
+      : "general audience",
     site: selectedSite || "default",
     site_context: context.siteContext || "No site context provided.",
     approved_internal_links: context.internalLinks || [],
     research_results: research || [],
-    modern_search_strategy: searchStrategy,
-    semantic_seo_strategy: semanticSeoStrategy,
     output_schema: JSON.parse(schema),
     output_requirements: {
       return_only_json: true,
@@ -1591,22 +1427,13 @@ async function buildArticlePromptPayload({
       "Do not invent quotes, dates, figures, rankings, or unsupported claims.",
       "Lead with the most important update first.",
       "Put the direct answer or key update in the first 2 paragraphs.",
-      "Add a Quick Answer or Quick Facts section near the top with a 1-2 sentence direct answer to the main query.",
-      "Start each major h2 section with the bottom line first, then add context, caveats, examples, and source support.",
-      "Make each major section atomic and self-contained enough to work as an answer-engine excerpt.",
-      "Write for the full modern search journey: curiosity, validation, comparison, and confirmation.",
-      "Write semantically around the full topic, not by repeating one exact keyword.",
-      "Use the provided research to infer a competitor-style outline, then improve it with clearer structure, better examples, and stronger next-step value.",
       "Use clear US English and concise paragraphs.",
       "Add context, why it matters, who is affected, and what to watch next.",
       "Prefer a specific, entity-led title over generic news phrasing.",
       "Make the article meaningfully better than a source summary.",
-      "Do not make every paragraph source-led. Use sources for facts, then add synthesis, implications, and reader takeaways.",
-      "Avoid thin formulaic structure. Do not stop at intro, bullets, a few short sections, and FAQ.",
     ],
     seo_requirements: {
-      min_words_after_stripping_html: minWords,
-      target_words_after_stripping_html: Math.max(minWords + 150, 750),
+      min_words_after_stripping_html: Number(process.env.MIN_ARTICLE_WORDS || 600),
       max_words_after_stripping_html: Number(process.env.MAX_ARTICLE_WORDS || 2500),
       must_include_table_of_contents: true,
       must_include_faq: true,
@@ -1619,8 +1446,6 @@ async function buildArticlePromptPayload({
         "Include focus keyword in slug.",
         "Use focus keyword near the beginning of the article where natural.",
         "Use focus keyword naturally in some subheadings.",
-        "Prefer decision-intent focus keywords when supported by the topic, such as review, best, alternatives, vs, pricing, worth it, cost, for a specific use case, or a branded decision query.",
-        "Do not target artificial keyword density. Use semantic variants, entities, questions, and related subtopics naturally.",
       ],
       title_rules: [
         "Keep title highly clickable and accurate.",
@@ -1633,39 +1458,17 @@ async function buildArticlePromptPayload({
         "Answer-first formatting.",
         "Scannable sections and concise lists.",
         "Add quick facts, key takeaways, or quick answer near the top.",
-        "Use a dedicated Quick Answer section near the top for AI Overview extraction.",
-        "For decision topics, add a quick verdict or bottom line near the top.",
-        "Use simple declarative sentences and one main idea per sentence where possible.",
         "Use question-style FAQ headings.",
-      ],
-      original_value_rules: [
-        "Include at least one original value-add section that goes beyond the research snippets.",
-        "Good value-add sections include: What this means, Why it matters, Who is affected, Should you buy or wait, Pros and concerns, Alternatives, Comparison, Timeline, Risks, Market impact, User impact, or What to watch next.",
-        "Include one citation-friendly block where natural: a quick facts table, comparison table, timeline, checklist, pros and cons list, or practical decision guide.",
-        "Include one freshness check where relevant: what changed, what is newly updated, what is still uncertain, or what readers should verify next.",
-        "Explain entity relationships clearly: who made it, what changed, who is affected, what alternatives exist, and what is still unknown.",
-        "Make the article mention-worthy enough for another site, community discussion, video transcript, or AI answer to cite.",
-      ],
-      topical_authority_rules: [
-        "Group similar keyword variants into one article angle rather than duplicating the same intent.",
-        "Cover adjacent subtopics that belong on this page so it can rank for multiple related queries.",
-        "Use internal links to connect this page to related topical-cluster pages when approved links are available.",
-        "Include practical on-page elements: descriptive headings, image alt intent, crawlable external links, internal links, and FAQ.",
       ],
     },
     html_rules: {
       exactly_one_h1: true,
-      use_h2_for_main_sections: true,
-      allowed_heading_tags_after_h1: ["h2", "h3", "h4", "h5"],
-      faq_format: "<h2>FAQ</h2> with question-style <h3> headings",
+      allowed_heading_tags_after_h1: ["h3", "h4", "h5"],
+      disallow_h2: true,
       keep_headings_reasonably_short: true,
     },
     validation: {
       previous_validation_error: previousValidationError || null,
-      self_check_before_return: [
-        `Ensure articleHtml contains at least ${Math.max(minWords + 150, 750)} words after stripping HTML tags.`,
-        "If too short, add more concrete context, analysis, FAQ answers, and what-to-watch-next sections before returning.",
-      ],
       instruction:
         previousValidationError
           ? "Your previous output failed validation. Fix that exact issue completely in this attempt."
@@ -1674,239 +1477,9 @@ async function buildArticlePromptPayload({
     image_requirements: {
       image_prompt_count: 3,
       image_alt_should_use_focus_keyword: true,
-      require_original_visual_concepts: true,
-      disallow_competitor_or_source_brand_names_in_alt_text: true,
-      alt_text_rule:
-        "Use neutral descriptive alt text. Do not include competitor/source-site names unless that brand is the actual article subject.",
     },
     reference_prompt: promptTemplate,
   };
-}
-
-function buildModernSearchStrategy(topic) {
-  const topicText = String(topic || "").trim();
-  const contentMode = (process.env.CONTENT_MODE || "").trim().toLowerCase();
-  const isNewsMode =
-    contentMode === "news" ||
-    selectedSite.toLowerCase().includes("kafirana") ||
-    /\b(news|update|launch|announced|released|policy|law|market|stock|election|court|weather|sports)\b/i.test(
-      topicText,
-    );
-  const isDecisionTopic =
-    /\b(best|review|vs|versus|alternative|alternatives|pricing|price|cost|worth it|compare|comparison|tool|tools|software|app|phone|car|bike|ev|download|buy|deal|offer|service|platform|plugin|course)\b/i.test(
-      topicText,
-    );
-
-  const journey = [
-    "Curiosity: answer the broad question quickly so readers know they are in the right place.",
-    "Validation: include source-backed facts, limits, risks, and signs of trust.",
-    "Comparison: help readers compare options, alternatives, tradeoffs, or scenarios where relevant.",
-    "Confirmation: close with a practical next step, bottom line, or what to watch next.",
-  ];
-
-  if (isDecisionTopic && !isNewsMode) {
-    return {
-      mode: "decision",
-      summary:
-        "Prioritize high-intent decision keywords and help the reader make or narrow a choice.",
-      journey,
-      prefer_keywords: [
-        `${topicText} review`,
-        `${topicText} alternatives`,
-        `${topicText} vs competitors`,
-        `${topicText} pricing`,
-        `is ${topicText} worth it`,
-        `best ${topicText} for specific use cases`,
-      ],
-      recommended_sections: [
-        "Quick verdict",
-        "Who this is best for",
-        "Key features or benefits",
-        "Pros and cons",
-        "Alternatives or comparisons",
-        "Pricing, cost, availability, or requirements",
-        "Risks, limitations, or what to check first",
-        "Is it worth it?",
-        "FAQ",
-      ],
-      avoid: [
-        "Do not make the article mostly a definition.",
-        "Do not chase broad low-intent informational traffic if the topic can support decision intent.",
-      ],
-    };
-  }
-
-  if (isNewsMode) {
-    return {
-      mode: "news-validation",
-      summary:
-        "Treat the article as validation-focused search content: readers want to know what changed, whether it matters, and what comes next.",
-      journey,
-      prefer_keywords: [
-        `${topicText} update`,
-        `${topicText} latest`,
-        `${topicText} explained`,
-        `${topicText} impact`,
-        `${topicText} what changed`,
-      ],
-      recommended_sections: [
-        "Quick facts or key takeaways",
-        "What changed",
-        "Why it matters",
-        "Who is affected",
-        "Key details",
-        "Risks, uncertainty, or limits",
-        "What to watch next",
-        "FAQ",
-      ],
-      avoid: [
-        "Do not pad the article with dictionary-style background.",
-        "Do not force product-review sections unless the topic is a product, tool, platform, or launch.",
-      ],
-    };
-  }
-
-  return {
-    mode: "hybrid",
-    summary:
-      "Blend answer-first education with decision-helping sections so the article can satisfy Google, AI summaries, and readers comparing options.",
-    journey,
-    prefer_keywords: [
-      `${topicText} guide`,
-      `${topicText} examples`,
-      `${topicText} checklist`,
-      `${topicText} best practices`,
-      `${topicText} FAQ`,
-    ],
-    recommended_sections: [
-      "Quick answer",
-      "What it means",
-      "When it matters",
-      "Examples or use cases",
-      "Steps or checklist",
-      "Mistakes, risks, or limitations",
-      "What to do next",
-      "FAQ",
-    ],
-    avoid: [
-      "Do not write a thin overview.",
-      "Do not rely on generic definitions when examples, comparisons, or next steps would be more useful.",
-    ],
-  };
-}
-
-function buildSemanticSeoStrategy(topic, research = []) {
-  const topicText = String(topic || "").trim();
-  const terms = extractSemanticTerms(topicText, research);
-  const questionSeeds = buildQuestionSeeds(topicText);
-  const clusterAngles = buildClusterAngles(topicText);
-
-  return {
-    summary:
-      "Use topical mapping and semantic content writing: cover the topic deeply enough for related queries without keyword stuffing or duplicate intent.",
-    topical_mapping: {
-      primary_topic: topicText,
-      cluster_angles: clusterAngles,
-      related_terms_to_consider: terms,
-      question_queries_to_answer: questionSeeds,
-    },
-    writing_rules: [
-      "Write on the topic rather than repeating the exact focus keyword.",
-      "Make each major section answer a distinct sub-intent.",
-      "Use related entities, modifiers, problems, use cases, risks, comparisons, and FAQs naturally.",
-      "Avoid cannibalization by keeping this article focused on one clear page intent.",
-      "Avoid duplicate paragraphs that say the same thing with different keywords.",
-      "Make the content skimmable with short paragraphs, descriptive headings, lists, and tables when useful.",
-    ],
-    on_page_rules: [
-      "Include the focus keyword in the title, slug, meta description, opening, at least one heading, and image alt text where natural.",
-      "Include at least one relevant internal link when approved links exist.",
-      "Include at least one crawlable external source link.",
-      "Use FAQ questions that reflect real user searches.",
-      "Keep headings concise and meaningful; do not use headings as keyword stuffing.",
-    ],
-  };
-}
-
-function extractSemanticTerms(topic, research = []) {
-  const stopWords = new Set([
-    "about",
-    "after",
-    "also",
-    "and",
-    "are",
-    "best",
-    "but",
-    "can",
-    "for",
-    "from",
-    "has",
-    "how",
-    "into",
-    "latest",
-    "more",
-    "new",
-    "news",
-    "not",
-    "now",
-    "the",
-    "this",
-    "to",
-    "top",
-    "update",
-    "what",
-    "when",
-    "where",
-    "why",
-    "with",
-    "you",
-    "your",
-  ]);
-  const text = [
-    topic,
-    ...research.flatMap((item) => [
-      item.title,
-      item.snippet,
-      item.description,
-      item.source,
-    ]),
-  ]
-    .filter(Boolean)
-    .join(" ");
-
-  const counts = new Map();
-  for (const match of text.matchAll(/[a-zA-Z][a-zA-Z0-9+-]{2,}/g)) {
-    const term = match[0].toLowerCase();
-    if (stopWords.has(term)) continue;
-    counts.set(term, (counts.get(term) || 0) + 1);
-  }
-
-  return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .slice(0, 18)
-    .map(([term]) => term);
-}
-
-function buildQuestionSeeds(topic) {
-  const cleanTopic = String(topic || "").trim();
-  return [
-    `What is the bottom line on ${cleanTopic}?`,
-    `Who is ${cleanTopic} best for or most relevant to?`,
-    `What are the main benefits and risks of ${cleanTopic}?`,
-    `How does ${cleanTopic} compare with alternatives?`,
-    `What should readers check before deciding on ${cleanTopic}?`,
-  ];
-}
-
-function buildClusterAngles(topic) {
-  const cleanTopic = String(topic || "").trim();
-  return [
-    `${cleanTopic} overview`,
-    `${cleanTopic} benefits`,
-    `${cleanTopic} risks or limitations`,
-    `${cleanTopic} alternatives or comparisons`,
-    `${cleanTopic} practical next steps`,
-  ];
 }
 
 async function maybeCopyEditArticle(article, topic, research, context = {}) {
@@ -1917,10 +1490,7 @@ async function maybeCopyEditArticle(article, topic, research, context = {}) {
     "Copy edit this generated WordPress article for clarity, usefulness, trust, and SEO.",
     "Preserve all facts. Do not add unsupported claims, quotes, figures, dates, or named entities.",
     "Improve the title, meta description, opening clarity, section usefulness, FAQ answers, and internal-link fit where needed.",
-    "Preserve the modern search strategy: answer early, add validation, support comparison where relevant, and keep decision-helping sections such as quick verdict, pros and cons, alternatives, pricing, or what to watch next when they fit the topic.",
-    "Preserve semantic SEO quality: cover the full topic, remove duplicate intent, add natural related terms where useful, and avoid exact-match keyword stuffing.",
-    "Keep exactly one h1. Use h2 for main sections and h3/h4/h5 for subsections. Keep the article between 600 and 2500 words.",
-    "Keep or add a near-top Quick Answer or Quick Facts section with a direct 1-2 sentence answer.",
+    "Keep exactly one h1. Do not use h2 tags. Keep the article between 600 and 2500 words.",
     "Return only valid JSON with the same keys as the original article object.",
     "",
     `Topic: ${topic}`,
@@ -1976,7 +1546,6 @@ async function expandShortArticle(
   schema,
   validationError,
 ) {
-  console.log("Starting short-article expansion pass...");
   const prompt = JSON.stringify(
     {
       task: "Expand the existing article so it passes the minimum word-count requirement while preserving facts and structure.",
@@ -1992,15 +1561,10 @@ async function expandShortArticle(
         keep_existing_facts_only: true,
         preserve_title_slug_meta_when_still_valid: true,
         min_words_after_stripping_html: Number(process.env.MIN_ARTICLE_WORDS || 600),
-        target_words_after_stripping_html: Math.max(
-          Number(process.env.MIN_ARTICLE_WORDS || 600) + 150,
-          750,
-        ),
         max_words_after_stripping_html: Number(process.env.MAX_ARTICLE_WORDS || 2500),
         exactly_one_h1: true,
-        use_h2_for_main_sections: true,
-        allowed_heading_tags_after_h1: ["h2", "h3", "h4", "h5"],
-        faq_format: "<h2>FAQ</h2> with question-style <h3> headings",
+        disallow_h2: true,
+        allowed_heading_tags_after_h1: ["h3", "h4", "h5"],
         must_expand_with: [
           "more concrete context",
           "why it matters",
@@ -2008,7 +1572,6 @@ async function expandShortArticle(
           "what to watch next",
           "FAQ answers",
           "quick facts or key takeaways",
-          "a direct Quick Answer near the top",
         ],
       },
       article_json: article,
@@ -2018,7 +1581,7 @@ async function expandShortArticle(
   );
 
   const instructions =
-    "Expand the article substantially. Fix the word-count failure completely. Do not stop near the minimum; exceed it comfortably. Return only valid JSON matching output_schema.";
+    "Expand the article substantially. Fix the word-count failure completely. Return only valid JSON matching output_schema.";
 
   let raw;
   if (provider === "openai") {
@@ -2055,40 +1618,31 @@ function resolvePromptTemplate() {
 
   const contentMode = (process.env.CONTENT_MODE || "").trim().toLowerCase();
   if (contentMode === "news") return "news-article-writer.md";
+  if (contentMode === "ipo") return "ipo-gmp-writer.md";
 
   const siteName = selectedSite.toLowerCase();
   if (siteName.includes("kafirana") || siteName.includes("news")) {
     return "news-article-writer.md";
   }
 
+  // Auto-detect IPO/GMP topics and use the IPO prompt automatically
+  const topic = (customTopic || "").toLowerCase();
+  const ipoKeywords = ["ipo", "gmp", "grey market", "listing price", "allotment", "subscription status"];
+  if (ipoKeywords.some((kw) => topic.includes(kw))) {
+    return "ipo-gmp-writer.md";
+  }
+
   return "article-writer.md";
 }
 
-function getAudienceLabel() {
-  if (selectedSite.toLowerCase().includes("kafirana")) {
-    return "US news audience";
-  }
-  if (isEliteBulletinSite()) {
-    return "Indian Hindi/Hinglish tech, gaming, automobile, AI, and yojana news audience";
-  }
-  return "general audience";
-}
-
-function isEliteBulletinSite() {
-  return selectedSite.toLowerCase().includes("elitebulletin");
-}
-
 async function callGemini({ instructions, prompt }) {
-  const apiKeys = getApiKeyPool("GEMINI_API_KEYS", "GEMINI_API_KEY");
-  if (!apiKeys.length) {
-    throw new Error(
-      "Missing GEMINI_API_KEY or GEMINI_API_KEYS in wordpress-auto-publisher/.env.",
-    );
-  }
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey)
+    throw new Error("Missing GEMINI_API_KEY in wordpress-auto-publisher/.env.");
   const models = getModelPool(
     process.env.GEMINI_MODEL,
     process.env.GEMINI_MODEL_POOL,
-    "gemini-2.5-flash,gemini-2.0-flash",
+    "gemma-4-31b-it,gemma-4-26b-a4b-it",
   );
   const baseUrl = (
     process.env.GEMINI_API_URL ||
@@ -2096,78 +1650,63 @@ async function callGemini({ instructions, prompt }) {
   ).replace(/\/+$/, "");
   const endpoint = ":generateContent";
   const errors = [];
+  let authFailure = false;
 
-  for (const [keyIndex, apiKey] of apiKeys.entries()) {
-    let keyFailure = false;
-    console.log(`Trying Gemini key #${keyIndex + 1}...`);
+  for (const model of models) {
+    const url = `${baseUrl}/${model}${endpoint}`;
+    let text;
+    let json;
+    let response;
 
-    for (const model of models) {
-      console.log(`Trying Gemini model: ${model}`);
-      const url = `${baseUrl}/${model}${endpoint}`;
-      let text;
-      let json;
-      let response;
-
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(
-          () => controller.abort(),
-          Number(process.env.GEMINI_TIMEOUT_MS || 120000),
-        );
-        response = await fetch(url, {
-          method: "POST",
-          signal: controller.signal,
-          headers: {
-            "Content-Type": "application/json",
-            "x-goog-api-key": apiKey,
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
+        },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: instructions }] },
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.55,
+            responseMimeType: "application/json",
+            responseSchema: articleResponseSchema(),
           },
-          body: JSON.stringify({
-            system_instruction: { parts: [{ text: instructions }] },
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: {
-              temperature: 0.55,
-              responseMimeType: "application/json",
-              responseSchema: articleResponseSchema(),
-            },
-          }),
-        });
-        clearTimeout(timeout);
-        text = await response.text();
-        try {
-          json = JSON.parse(text);
-        } catch {
-          const detail = text.trim() || `${response.status} ${response.statusText}`;
-          throw new Error(
-            `Gemini response was not valid JSON for ${url}: ${detail.slice(0, 400)}`,
-          );
-        }
-      } catch (error) {
-        errors.push(
-          `key#${keyIndex + 1} ${model}${endpoint}: ${formatNetworkError(error)}`,
+        }),
+      });
+      text = await response.text();
+      try {
+        json = JSON.parse(text);
+      } catch {
+        const detail = text.trim() || `${response.status} ${response.statusText}`;
+        throw new Error(
+          `Gemini response was not valid JSON for ${url}: ${detail.slice(0, 400)}`,
         );
-        continue;
       }
-
-      if (response.ok) {
-        console.log(`AI model selected: ${model}${endpoint} via key #${keyIndex + 1}`);
-        return extractGeminiText(json);
-      }
-
-      const message =
-        json?.error?.message || response.statusText || text.slice(0, 200);
-      errors.push(`key#${keyIndex + 1} ${model}${endpoint}: ${response.status} ${message}`);
-
-      if ([401, 403, 429].includes(response.status)) {
-        keyFailure = true;
-        break;
-      }
+    } catch (error) {
+      errors.push(`${model}${endpoint}: ${error.message}`);
+      continue;
     }
 
-    if (keyFailure) continue;
+    if (response.ok) {
+      console.log(`AI model selected: ${model}${endpoint}`);
+      return extractGeminiText(json);
+    }
+
+    const message =
+      json?.error?.message || response.statusText || text.slice(0, 200);
+    errors.push(`${model}${endpoint}: ${response.status} ${message}`);
+    if ([401, 403].includes(response.status)) {
+      authFailure = true;
+      break;
+    }
+
+    if (authFailure) break;
   }
 
   throw new Error(
-    `Gemini failed after trying ${apiKeys.length} key(s) and ${models.length} model(s):\n${errors.join("\n")}`,
+    `Gemini failed after trying ${models.length} model(s):\n${errors.join("\n")}`,
   );
 }
 
@@ -2271,91 +1810,16 @@ function parseJsonObject(raw) {
     .replace(/^```\s*/i, "")
     .replace(/```$/i, "")
     .trim();
-
-  const objectText = extractObjectText(cleaned);
-  const attempts = [cleaned];
-  if (objectText && objectText !== cleaned) attempts.push(objectText);
-
-  for (const candidate of attempts) {
-    try {
-      return JSON.parse(candidate);
-    } catch {
-      // Try the next candidate.
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    const start = cleaned.indexOf("{");
+    const end = cleaned.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      return JSON.parse(cleaned.slice(start, end + 1));
     }
+    throw new Error(`AI did not return valid JSON:\n${raw}`);
   }
-
-  const repaired = repairArticleJson(objectText || cleaned);
-  if (repaired) return repaired;
-
-  throw new Error(
-    `AI did not return valid JSON. First 500 chars:\n${cleaned.slice(0, 500)}`,
-  );
-}
-
-function extractObjectText(value) {
-  const start = value.indexOf("{");
-  const end = value.lastIndexOf("}");
-  if (start >= 0 && end > start) return value.slice(start, end + 1);
-  return "";
-}
-
-function repairArticleJson(value) {
-  const title = extractJsonStringField(value, "title");
-  const slug = extractJsonStringField(value, "slug");
-  const metaDescription = extractJsonStringField(value, "metaDescription");
-  const focusKeyword = extractJsonStringField(value, "focusKeyword");
-  const articleHtml = extractJsonStringField(value, "articleHtml");
-
-  if (!title || !articleHtml) return null;
-
-  return {
-    title,
-    slug: slug || title,
-    metaDescription: metaDescription || "",
-    focusKeyword: focusKeyword || title,
-    secondaryKeywords: [],
-    articleHtml,
-    imagePrompts: [],
-  };
-}
-
-function extractJsonStringField(value, fieldName) {
-  const keyPattern = new RegExp(`"${fieldName}"\\s*:\\s*"`, "g");
-  const keyMatch = keyPattern.exec(value);
-  if (!keyMatch) return "";
-
-  let result = "";
-  let escaped = false;
-  for (let index = keyPattern.lastIndex; index < value.length; index += 1) {
-    const char = value[index];
-    if (escaped) {
-      result += char;
-      escaped = false;
-      continue;
-    }
-    if (char === "\\") {
-      result += char;
-      escaped = true;
-      continue;
-    }
-    if (char !== "\"") {
-      result += char;
-      continue;
-    }
-
-    const rest = value.slice(index + 1);
-    if (/^\s*(,\s*"[A-Za-z0-9_]+"\s*:|})/.test(rest)) {
-      try {
-        return JSON.parse(`"${result}"`);
-      } catch {
-        return result.replace(/\\"/g, "\"");
-      }
-    }
-
-    result += char;
-  }
-
-  return result;
 }
 
 function normalizeArticleStructure(article, topic, research = []) {
@@ -2375,6 +1839,8 @@ function normalizeArticleStructure(article, topic, research = []) {
     normalized.title || sanitizeGeneratedTitle(topic, topic, research);
   let html = String(normalized.articleHtml || "").trim();
 
+  html = html.replace(/<h2(\b[^>]*)>/gi, "<h3$1>");
+  html = html.replace(/<\/h2>/gi, "</h3>");
   html = html.replace(/<h6(\b[^>]*)>/gi, "<h5$1>");
   html = html.replace(/<\/h6>/gi, "</h5>");
 
@@ -2527,34 +1993,19 @@ function validateArticleStructure(articleHtml) {
   const maxWords = Number(process.env.MAX_ARTICLE_WORDS || 2500);
   const minWordGrace = Number(process.env.MIN_ARTICLE_WORDS_GRACE || 25);
   const h1Count = (articleHtml.match(/<h1\b/gi) || []).length;
+  const h2Count = (articleHtml.match(/<h2\b/gi) || []).length;
 
   if (h1Count !== 1) return `expected exactly 1 h1, got ${h1Count}`;
+  if (h2Count !== 0) return `expected 0 h2 tags, got ${h2Count}`;
   if (wordCount < Math.max(0, minWords - minWordGrace))
     return `expected at least ${minWords} words, got ${wordCount}`;
   if (wordCount > maxWords)
     return `expected at most ${maxWords} words, got ${wordCount}`;
 
   const sections = splitSectionsByHeading(articleHtml);
-  const nonH1Sections = sections.filter((section) => !/^h1$/i.test(section.tag));
-  if (!nonH1Sections.some((section) => /^h2$/i.test(section.tag))) {
-    return "expected at least one h2 main section after h1";
-  }
-
-  const firstNonH1 = nonH1Sections[0];
-  if (firstNonH1 && !/^h2$/i.test(firstNonH1.tag)) {
-    return `first heading after h1 should be h2, got ${firstNonH1.tag.toLowerCase()}`;
-  }
-
-  let previousLevel = 1;
   for (const section of sections) {
-    const level = headingLevel(section.tag);
-    if (level > previousLevel + 1) {
-      return `heading hierarchy jumps from h${previousLevel} to ${section.tag.toLowerCase()}`;
-    }
-    previousLevel = level;
-
     const headingText = stripHtml(section.heading).replace(/\s+/g, " ").trim();
-    if (/^h[2-5]$/i.test(section.tag)) {
+    if (/^h[3-5]$/i.test(section.tag)) {
       if (isUtilityHeading(headingText)) {
         continue;
       }
@@ -2565,10 +2016,6 @@ function validateArticleStructure(articleHtml) {
   }
 
   return null;
-}
-
-function headingLevel(tag) {
-  return Number(String(tag || "").replace(/[^0-9]/g, "")) || 0;
 }
 
 function runSeoQualityGate({
@@ -2645,24 +2092,11 @@ function getSeoQualityIssues({
     issues.push("Missing focus keyword.");
   }
 
-  if (!hasHeadingMatching(html, /\b(table of contents|contents)\b/i)) {
-    issues.push("Missing table of contents section.");
+  if (!/<h3\b[^>]*>[\s\S]*?(table of contents|key takeaways|quick facts|quick answer)/i.test(html)) {
+    issues.push("Missing table of contents, quick answer, quick facts, or key takeaways section.");
   }
-  if (!hasHeadingMatching(html, /\b(quick answer|quick facts|key takeaways|bottom line|quick verdict)\b/i)) {
-    issues.push("Missing quick answer, quick facts, key takeaways, bottom line, or quick verdict section.");
-  }
-  if (!hasHeadingMatching(html, /\b(faq|frequently asked questions)\b/i)) {
+  if (!/<h3\b[^>]*>[\s\S]*?(faq|frequently asked questions)/i.test(html)) {
     issues.push("Missing FAQ section.");
-  }
-  if (!hasOriginalValueAddSection(html)) {
-    issues.push(
-      "Missing original value-add section such as what this means, why it matters, risks, comparison, market impact, user impact, or what to watch next.",
-    );
-  }
-  if (!hasCitationFriendlyBlock(html)) {
-    issues.push(
-      "Missing citation-friendly block such as a table, timeline, checklist, pros/cons list, quick facts, comparison, or decision guide.",
-    );
   }
   if (!/<a\s+[^>]*href=["']https?:\/\//i.test(html)) {
     issues.push("Missing crawlable external or internal links.");
@@ -2690,41 +2124,6 @@ function hasGenericTitlePrefix(title) {
 
 function genericTitlePrefixPattern() {
   return /^(us news today|us trending news|us news update|breaking news|latest news|trending news)(?:\s*[:\-–—]\s*|\s+)/i;
-}
-
-function hasOriginalValueAddSection(html) {
-  const headings = [
-    ...String(html || "").matchAll(/<h[2-5]\b[^>]*>([\s\S]*?)<\/h[2-5]>/gi),
-  ].map((match) => stripHtml(match[1]).toLowerCase());
-
-  return headings.some((heading) =>
-    /\b(what this means|why it matters|who is affected|should you|buy or wait|worth it|pros and concerns|pros and cons|alternatives?|comparison|compare|timeline|risks?|market impact|user impact|reader impact|what to watch next|bottom line|quick verdict|decision guide)\b/i.test(
-      heading,
-    ),
-  );
-}
-
-function hasHeadingMatching(html, pattern) {
-  return [
-    ...String(html || "").matchAll(/<h[2-5]\b[^>]*>([\s\S]*?)<\/h[2-5]>/gi),
-  ].some((match) => pattern.test(stripHtml(match[1])));
-}
-
-function hasCitationFriendlyBlock(html) {
-  const source = String(html || "");
-  if (/<table\b/i.test(source)) return true;
-
-  const lowerText = stripHtml(source).toLowerCase();
-  if (
-    /\b(timeline|checklist|quick facts|key takeaways|pros and cons|pros and concerns|comparison|compare|decision guide|at a glance)\b/i.test(
-      lowerText,
-    )
-  ) {
-    return true;
-  }
-
-  const listItems = source.match(/<li\b[\s\S]*?<\/li>/gi) || [];
-  return listItems.length >= 4;
 }
 
 function splitSectionsByHeading(articleHtml) {
@@ -2779,17 +2178,16 @@ function isUtilityHeading(headingText) {
   ].includes(normalized);
 }
 
-async function uploadImages(images, slug, article = {}) {
+async function uploadImages(images, slug) {
   const uploads = [];
   const desiredUploads = Number(process.env.IMAGES_PER_POST || 1);
   const selectedImages = images.slice(0, Number(process.env.IMAGE_UPLOAD_ATTEMPTS || 5));
-  const imageTimeoutMs = Number(process.env.IMAGE_UPLOAD_TIMEOUT_MS || 10000);
   for (let index = 0; index < selectedImages.length; index += 1) {
     if (uploads.length >= desiredUploads) break;
     const image = selectedImages[index];
     try {
       const local = image.source === "local";
-      const response = local ? null : await fetchWithTimeout(image.link, {}, imageTimeoutMs);
+      const response = local ? null : await fetch(image.link);
       if (response && !response.ok)
         throw new Error(`${response.status} ${response.statusText}`);
       const buffer = local
@@ -2804,7 +2202,7 @@ async function uploadImages(images, slug, article = {}) {
         filename,
         contentType,
         buffer,
-        altText: buildNeutralImageAltText(article, image),
+        altText: image.title,
       });
       uploads.push({
         ...uploaded,
@@ -2818,22 +2216,6 @@ async function uploadImages(images, slug, article = {}) {
   return uploads;
 }
 
-function buildNeutralImageAltText(article = {}, image = {}) {
-  const candidates = [
-    article.focusKeyword,
-    article.title,
-    image.source === "local" ? image.title : "",
-  ];
-  const raw =
-    candidates.find((candidate) => String(candidate || "").trim()) ||
-    "Article image";
-  return stripHtml(raw)
-    .replace(/[|]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, Number(process.env.IMAGE_ALT_MAX_CHARS || 120));
-}
-
 async function uploadWordPressMedia({
   filename,
   contentType,
@@ -2841,21 +2223,15 @@ async function uploadWordPressMedia({
   altText,
 }) {
   const url = `${wordpressBaseUrl()}/wp-json/wp/v2/media`;
-  const mediaTimeoutMs = Number(process.env.WP_MEDIA_UPLOAD_TIMEOUT_MS || 10000);
-  const response = await fetchWithRetry(
-    url,
-    {
-      method: "POST",
-      headers: {
-        Authorization: wordpressAuthHeader(),
-        "Content-Disposition": `attachment; filename="${filename}"`,
-        "Content-Type": contentType,
-      },
-      body: buffer,
-      timeout: mediaTimeoutMs,
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: wordpressAuthHeader(),
+      "Content-Disposition": `attachment; filename="${filename}"`,
+      "Content-Type": contentType,
     },
-    "WordPress media upload",
-  );
+    body: buffer,
+  });
   const json = await response.json();
   if (!response.ok) {
     throw new Error(
@@ -2864,18 +2240,14 @@ async function uploadWordPressMedia({
   }
 
   if (altText) {
-    await fetchWithRetry(
-      `${url}/${json.id}`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: wordpressAuthHeader(),
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ alt_text: altText }),
+    await fetch(`${url}/${json.id}`, {
+      method: "POST",
+      headers: {
+        Authorization: wordpressAuthHeader(),
+        "Content-Type": "application/json",
       },
-      "WordPress media alt text update",
-    );
+      body: JSON.stringify({ alt_text: altText }),
+    });
   }
 
   return {
@@ -2907,18 +2279,14 @@ async function createWordPressPost({
   if (categoryIds.length) body.categories = categoryIds;
   addIdList(body, "tags", process.env.WP_DEFAULT_TAG_IDS);
 
-  const response = await fetchWithRetry(
-    `${wordpressBaseUrl()}/wp-json/wp/v2/posts`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: wordpressAuthHeader(),
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
+  const response = await fetch(`${wordpressBaseUrl()}/wp-json/wp/v2/posts`, {
+    method: "POST",
+    headers: {
+      Authorization: wordpressAuthHeader(),
+      "Content-Type": "application/json",
     },
-    "WordPress post creation",
-  );
+    body: JSON.stringify(body),
+  });
   const json = await response.json();
   if (!response.ok) {
     throw new Error(
@@ -2970,7 +2338,7 @@ function addRelatedInternalLinks(articleHtml, internalLinks) {
     )
     .join("");
 
-  return `${articleHtml}\n\n<h2>Related Reading</h2>\n<ul>${items}</ul>`;
+  return `${articleHtml}\n\n<h3>Related Reading</h3>\n<ul>${items}</ul>`;
 }
 
 function selectUsefulInternalLinks(articleHtml, internalLinks) {
@@ -3162,16 +2530,14 @@ function buildFaqJsonLd(articleHtml) {
 
 function extractFaqs(articleHtml) {
   const html = String(articleHtml || "");
-  const headingPattern = /<(h[2-5])\b[^>]*>([\s\S]*?)<\/\1>/gi;
+  const headingPattern = /<(h[3-5])\b[^>]*>([\s\S]*?)<\/\1>/gi;
   const headings = [...html.matchAll(headingPattern)];
   const faqs = [];
   let inFaq = false;
-  let faqLevel = 0;
 
   for (let index = 0; index < headings.length; index += 1) {
     const current = headings[index];
     const tag = current[1].toLowerCase();
-    const level = headingLevel(tag);
     const headingText = stripHtml(current[2]);
     const headingStart = current.index ?? 0;
     const bodyStart = headingStart + current[0].length;
@@ -3183,11 +2549,10 @@ function extractFaqs(articleHtml) {
 
     if (/^(faq|faqs|frequently asked questions)$/i.test(headingText)) {
       inFaq = true;
-      faqLevel = level;
       continue;
     }
 
-    if (inFaq && level <= faqLevel) {
+    if (inFaq && tag === "h3") {
       break;
     }
 
@@ -3405,14 +2770,13 @@ function requireWordPressConfig() {
 
 async function verifyWordPressAccess() {
   if (wordpressAccessVerified) return;
-  const response = await fetchWithRetry(
+  const response = await fetch(
     `${wordpressBaseUrl()}/wp-json/wp/v2/users/me?context=edit`,
     {
       headers: {
         Authorization: wordpressAuthHeader(),
       },
     },
-    "WordPress user verification",
   );
   const json = await response.json();
   if (!response.ok) {
@@ -3455,14 +2819,13 @@ async function resolveDefaultCategoryIds() {
     return cachedCategoryIds;
   }
 
-  const response = await fetchWithRetry(
+  const response = await fetch(
     `${wordpressBaseUrl()}/wp-json/wp/v2/categories?search=${encodeURIComponent(categoryName)}&per_page=100`,
     {
       headers: {
         Authorization: wordpressAuthHeader(),
       },
     },
-    "WordPress category lookup",
   );
   const json = await response.json();
   if (!response.ok) {
@@ -3486,23 +2849,14 @@ async function resolveDefaultCategoryIds() {
 }
 
 function getModelPool(fixedModel, configuredPool, fallbackPool) {
-  const fixed = fixedModel?.trim();
-  const pool = (configuredPool || fallbackPool)
-    .split(",")
-    .map((model) => model.trim())
-    .filter(Boolean)
-    .filter((model) => !model.toLowerCase().includes("tts"));
-  return [...new Set([...(fixed ? [fixed] : []), ...shuffle(pool)])];
-}
-
-function getApiKeyPool(multiKeyEnv, singleKeyEnv) {
-  const fromPool = String(process.env[multiKeyEnv] || "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean);
-  const single = String(process.env[singleKeyEnv] || "").trim();
-  const combined = [...fromPool, ...(single ? [single] : [])];
-  return shuffle([...new Set(combined)]);
+  if (fixedModel?.trim()) return [fixedModel.trim()];
+  return shuffle(
+    (configuredPool || fallbackPool)
+      .split(",")
+      .map((model) => model.trim())
+      .filter(Boolean)
+      .filter((model) => !model.toLowerCase().includes("tts")),
+  );
 }
 
 function shuffle(values) {
