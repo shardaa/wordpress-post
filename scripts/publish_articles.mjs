@@ -2306,18 +2306,64 @@ async function createWordPressPost({
 }
 
 function buildPostHtml(article, research, images, slug, internalLinks = []) {
-  const bodyHtml = addRelatedInternalLinks(
-    stripLeadingH1(article.articleHtml),
-    internalLinks,
-  );
+  const focusKw = article.focusKeyword || article.title.split(" ").slice(0, 4).join(" ");
+  const rawHtml = stripLeadingH1(article.articleHtml);
+
+  // 1. Build In-Body Image with Focus Keyword in Alt text
+  let inBodyImage = "";
+  if (images && images.length) {
+    const mainImg = images[0];
+    const imgSrc = mainImg.sourceUrl || mainImg.originalImageUrl || mainImg.url || "";
+    if (imgSrc) {
+      inBodyImage = `
+<figure class="wp-block-image size-large" style="margin: 25px 0;">
+  <img src="${escapeHtml(imgSrc)}" alt="${escapeHtml(focusKw)} Guide and Analysis" style="width: 100%; border-radius: 8px;" />
+  <figcaption style="text-align: center; font-size: 13px; color: #64748b; margin-top: 6px;">${escapeHtml(focusKw)} - Key Insights & Data</figcaption>
+</figure>`;
+    }
+  }
+
+  // 2. Build HTML Table of Contents with Jump Anchors
+  let tocHtml = "";
+  const h2Matches = [...rawHtml.matchAll(/<h2\b[^>]*>([\s\S]*?)<\/h2>/gi)];
+  if (h2Matches.length >= 2) {
+    const tocItems = h2Matches.slice(0, 6).map((m, idx) => {
+      const headingText = stripHtml(m[1]).trim();
+      const anchor = headingText.toLowerCase().replace(/[\W_]+/g, "-").replace(/^-+|-+$/g, "");
+      return `<li><a href="#${anchor}">${idx + 1}. ${escapeHtml(headingText)}</a></li>`;
+    });
+    tocHtml = `
+<div class="rank-math-toc-block" style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 20px; margin: 25px 0;">
+  <h3 style="margin-top: 0; margin-bottom: 12px; font-size: 18px; color: #0f172a;">Table of Contents</h3>
+  <ul style="margin: 0; padding-left: 20px; line-height: 1.8;">
+    ${tocItems.join("\n    ")}
+  </ul>
+</div>`;
+  }
+
+  // 3. Inject Jump Anchors into H2 headings
+  let anchoredHtml = rawHtml.replace(/<h2\b([^>]*)>([\s\S]*?)<\/h2>/gi, (match, attrs, content) => {
+    const headingText = stripHtml(content).trim();
+    const anchor = headingText.toLowerCase().replace(/[\W_]+/g, "-").replace(/^-+|-+$/g, "");
+    return `<h2 id="${anchor}"${attrs}>${content}</h2>`;
+  });
+
+  // 4. Opening Hook with Focus Keyword in first 10%
+  const openingHook = `<p>When reviewing <strong>${escapeHtml(focusKw)}</strong>, it is crucial to understand the latest market trends, official data, and key takeaways.</p>`;
+
+  // 5. Combine with Related Internal Links
+  const linkedHtml = addRelatedInternalLinks(anchoredHtml, internalLinks);
+
+  const fullBody = [openingHook, tocHtml, inBodyImage, linkedHtml].filter(Boolean).join("\n\n");
+
   const structuredData = buildStructuredData({
     article,
     research,
     images,
     slug,
-    bodyHtml,
+    bodyHtml: fullBody,
   });
-  return [bodyHtml, structuredData].filter(Boolean).join("\n\n");
+  return [fullBody, structuredData].filter(Boolean).join("\n\n");
 }
 
 function stripLeadingH1(articleHtml) {
