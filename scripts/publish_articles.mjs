@@ -220,6 +220,7 @@ async function main() {
         excerpt: article.metaDescription,
         slug: safeSlug,
         featuredMedia: uploadedImages[0]?.id,
+        focusKeyword: article.focusKeyword,
       });
       console.log(
         `WordPress post created: ${wordpressPost.link || wordpressPost.id}`,
@@ -2263,6 +2264,7 @@ async function createWordPressPost({
   excerpt,
   slug,
   featuredMedia,
+  focusKeyword,
 }) {
   requireWordPressConfig();
   await verifyWordPressAccess();
@@ -2272,6 +2274,13 @@ async function createWordPressPost({
     excerpt,
     slug,
     status: getValidWordPressStatus(),
+    meta: {
+      rank_math_focus_keyword: focusKeyword || title.split(" ").slice(0, 4).join(" "),
+      rank_math_title: title,
+      rank_math_description: excerpt ? String(excerpt).replace(/<[^>]+>/g, "").slice(0, 155) : title,
+      rank_math_robots: ["index", "follow"],
+      rank_math_rich_snippet: "article",
+    },
   };
 
   if (featuredMedia) body.featured_media = featuredMedia;
