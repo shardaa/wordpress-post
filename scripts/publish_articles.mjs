@@ -2305,9 +2305,36 @@ async function createWordPressPost({
   return json;
 }
 
+function resolveSiteCta(siteUrl, topic, focusKw) {
+  const url = String(siteUrl || "").toLowerCase();
+  if (url.includes("elitebulletin")) {
+    return `
+<div class="eb-cta-box" style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border-radius: 12px; padding: 24px; color: #ffffff; margin: 35px 0; text-align: center; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);">
+  <h4 style="color: #38bdf8; margin: 0 0 10px 0; font-size: 20px;">📱 Get Instant IPO & GMP Alerts</h4>
+  <p style="color: #cbd5e1; font-size: 15px; margin: 0 0 18px 0; line-height: 1.5;">Never miss upcoming IPO subscription dates, live grey market premiums, and allotment announcements.</p>
+  <a href="https://elitebulletin.in/category/ipo-gmp-analysis/" style="display: inline-block; background: #e11d48; color: #ffffff; padding: 12px 26px; font-weight: bold; border-radius: 6px; text-decoration: none; font-size: 15px;">Explore Live IPO Hub →</a>
+</div>`;
+  }
+  if (url.includes("kafirana")) {
+    return `
+<div class="kafirana-cta-box" style="background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%); border-radius: 12px; padding: 24px; color: #ffffff; margin: 35px 0; text-align: center; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);">
+  <h4 style="color: #60a5fa; margin: 0 0 10px 0; font-size: 20px;">📩 Join 50,000+ Daily Readers</h4>
+  <p style="color: #cbd5e1; font-size: 15px; margin: 0 0 18px 0; line-height: 1.5;">Get unbiased US breaking news, policy updates, and trending stories delivered fresh every morning.</p>
+  <a href="https://kafirana.com/category/us-news/" style="display: inline-block; background: #2563eb; color: #ffffff; padding: 12px 26px; font-weight: bold; border-radius: 6px; text-decoration: none; font-size: 15px;">Read Latest US Headlines →</a>
+</div>`;
+  }
+  return `
+<div class="general-cta-box" style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border-radius: 12px; padding: 24px; color: #ffffff; margin: 35px 0; text-align: center;">
+  <h4 style="color: #38bdf8; margin: 0 0 10px 0; font-size: 20px;">🚀 Master AI & Modern Digital Growth</h4>
+  <p style="color: #cbd5e1; font-size: 15px; margin: 0 0 18px 0;">Explore step-by-step automation tutorials, SEO strategies, and expert guides.</p>
+  <a href="${siteUrl}" style="display: inline-block; background: #0284c7; color: #ffffff; padding: 12px 26px; font-weight: bold; border-radius: 6px; text-decoration: none;">Explore More Guides →</a>
+</div>`;
+}
+
 function buildPostHtml(article, research, images, slug, internalLinks = []) {
   const focusKw = article.focusKeyword || article.title.split(" ").slice(0, 4).join(" ");
   const rawHtml = stripLeadingH1(article.articleHtml);
+  const siteUrl = wordpressBaseUrl();
 
   // 1. Build In-Body Image with Focus Keyword in Alt text
   let inBodyImage = "";
@@ -2323,7 +2350,15 @@ function buildPostHtml(article, research, images, slug, internalLinks = []) {
     }
   }
 
-  // 2. Build HTML Table of Contents with Jump Anchors
+  // 2. Build BLUF (Bottom Line Up Front) Quick Summary Box
+  const summaryText = article.metaDescription || `Essential insights and key takeaways regarding ${focusKw} for smart decision-making.`;
+  const blufBox = `
+<div class="bluf-quick-verdict" style="background: #f0fdf4; border: 1px solid #bbf7d0; border-left: 5px solid #16a34a; border-radius: 8px; padding: 18px 22px; margin: 20px 0;">
+  <p style="margin: 0 0 6px 0; font-weight: bold; color: #166534; font-size: 16px;">⚡ Quick Takeaway (BLUF):</p>
+  <p style="margin: 0; color: #15803d; font-size: 15px; line-height: 1.6;">${escapeHtml(summaryText)}</p>
+</div>`;
+
+  // 3. Build HTML Table of Contents with Jump Anchors
   let tocHtml = "";
   const h2Matches = [...rawHtml.matchAll(/<h2\b[^>]*>([\s\S]*?)<\/h2>/gi)];
   if (h2Matches.length >= 2) {
@@ -2341,20 +2376,23 @@ function buildPostHtml(article, research, images, slug, internalLinks = []) {
 </div>`;
   }
 
-  // 3. Inject Jump Anchors into H2 headings
+  // 4. Inject Jump Anchors into H2 headings
   let anchoredHtml = rawHtml.replace(/<h2\b([^>]*)>([\s\S]*?)<\/h2>/gi, (match, attrs, content) => {
     const headingText = stripHtml(content).trim();
     const anchor = headingText.toLowerCase().replace(/[\W_]+/g, "-").replace(/^-+|-+$/g, "");
     return `<h2 id="${anchor}"${attrs}>${content}</h2>`;
   });
 
-  // 4. Opening Hook with Focus Keyword in first 10%
+  // 5. Opening Hook with Focus Keyword in first 10%
   const openingHook = `<p>When reviewing <strong>${escapeHtml(focusKw)}</strong>, it is crucial to understand the latest market trends, official data, and key takeaways.</p>`;
 
-  // 5. Combine with Related Internal Links
+  // 6. Site-Specific High Converting CTA Box
+  const ctaBox = resolveSiteCta(siteUrl, article.title, focusKw);
+
+  // 7. Combine with Related Internal Links
   const linkedHtml = addRelatedInternalLinks(anchoredHtml, internalLinks);
 
-  const fullBody = [openingHook, tocHtml, inBodyImage, linkedHtml].filter(Boolean).join("\n\n");
+  const fullBody = [openingHook, blufBox, tocHtml, inBodyImage, linkedHtml, ctaBox].filter(Boolean).join("\n\n");
 
   const structuredData = buildStructuredData({
     article,
