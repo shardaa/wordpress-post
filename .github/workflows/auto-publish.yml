@@ -33,7 +33,7 @@ jobs:
             content_mode: "news"
           - site: elitebulletin
             display_name: Elite Bulletin
-            content_mode: ""
+            content_mode: "ipo"
     env:
       HTTP_RETRY_ATTEMPTS: "8"
       HTTP_RETRY_DELAY_MS: "10000"
