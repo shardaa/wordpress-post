@@ -236,6 +236,9 @@ async function main() {
         url: wordpressPost.link || null,
         slug: safeSlug,
       });
+      if (selectedSite.toLowerCase().includes("elitebulletin")) {
+        await syncEliteBulletinHomepage();
+      }
     } else {
       console.log(
         "Dry run enabled: skipped image upload and WordPress post creation.",
@@ -2856,6 +2859,81 @@ async function updateLlmsTxt({ title, topic, url }) {
   content = updateLlmsTopicList(content, topic);
   await writeFile(llmsPath, content);
   console.log(`Updated llms.txt: ${title}`);
+}
+
+async function syncEliteBulletinHomepage() {
+  try {
+    const baseUrl = wordpressBaseUrl();
+    const authHeader = wordpressAuthHeader();
+    const [ipoRes, stockRes] = await Promise.all([
+      fetch(`${baseUrl}/wp-json/wp/v2/posts?categories=1498&per_page=6`, {
+        headers: { Authorization: authHeader },
+      }),
+      fetch(`${baseUrl}/wp-json/wp/v2/posts?categories=1499&per_page=6`, {
+        headers: { Authorization: authHeader },
+      }),
+    ]);
+
+    const ipoPosts = ipoRes.ok ? await ipoRes.json() : [];
+    const stockPosts = stockRes.ok ? await stockRes.json() : [];
+
+    const makeCard = (p, tagColor = "#e11d48") => {
+      const dateStr = (p.date || "").slice(0, 10);
+      const title = p.title?.rendered || "";
+      const link = p.link || "";
+      const excerpt = String(p.excerpt?.rendered || "")
+        .replace(/<[^>]+>/g, "")
+        .trim()
+        .slice(0, 140);
+      return `        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+            <span style="font-size: 12px; color: ${tagColor}; font-weight: 700; text-transform: uppercase;">${dateStr}</span>
+            <h3 style="margin: 8px 0; font-size: 18px; line-height: 1.4;"><a href="${link}" style="color: #0f172a; text-decoration: none; font-weight: 600;">${title}</a></h3>
+            <div style="color: #64748b; font-size: 14px; line-height: 1.5;"><p>${excerpt}...</p></div>
+        </div>`;
+    };
+
+    const ipoCards = ipoPosts.map((p) => makeCard(p, "#e11d48")).join("\n");
+    const stockCards = stockPosts.map((p) => makeCard(p, "#0284c7")).join("\n");
+
+    const newHomeContent = `<!-- wp:group {"layout":{"type":"constrained"}} -->
+<div class="wp-block-group" style="padding: 20px 0;">
+    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #e11d48; padding-bottom: 10px; margin-bottom: 20px;">
+        <h2 style="margin: 0; font-size: 24px; color: #0f172a;">IPO &amp; GMP Analysis</h2>
+        <a href="https://elitebulletin.in/category/ipo-gmp-analysis/" style="background: #e11d48; color: #ffffff; padding: 6px 14px; border-radius: 4px; text-decoration: none; font-size: 14px; font-weight: 600;">See All &rarr;</a>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; margin-top: 15px;">
+${ipoCards}
+    </div>
+</div>
+<!-- /wp:group -->
+
+<!-- wp:group {"layout":{"type":"constrained"}} -->
+<div class="wp-block-group" style="padding: 20px 0;">
+    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0284c7; padding-bottom: 10px; margin-bottom: 20px;">
+        <h2 style="margin: 0; font-size: 24px; color: #0f172a;">Stock Market Basics</h2>
+        <a href="https://elitebulletin.in/category/stock-market-basics/" style="background: #0284c7; color: #ffffff; padding: 6px 14px; border-radius: 4px; text-decoration: none; font-size: 14px; font-weight: 600;">See All &rarr;</a>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; margin-top: 15px;">
+${stockCards}
+    </div>
+</div>
+<!-- /wp:group -->`;
+
+    const updateRes = await fetch(`${baseUrl}/wp-json/wp/v2/pages/1227`, {
+      method: "POST",
+      headers: {
+        Authorization: authHeader,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ content: newHomeContent }),
+    });
+
+    if (updateRes.ok) {
+      console.log("EliteBulletin homepage (ID 1227) updated with latest live articles.");
+    }
+  } catch (err) {
+    console.warn("Homepage sync skipped:", err.message);
+  }
 }
 
 function trimLatestArticlesSection(content, maxItems) {
