@@ -67,11 +67,13 @@ async function scrapeLiveGmpData() {
       );
     }
 
-    if (cells.length >= 4) {
+    if (cells.length >= 7) {
       const name = cells[0];
       const gmp = cells[1];
       const price = cells[3];
       const gain = cells[4] || "";
+      const dates = cells[5] || "";
+      const statusRaw = (cells[6] || "").toLowerCase();
 
       // Filter out table headers or invalid rows
       if (
@@ -82,9 +84,19 @@ async function scrapeLiveGmpData() {
         continue;
       }
 
-      // STRICT FILTER: Exclude already listed shares or unpriced issues
-      const isListed = /listed|closed|expired|completed/i.test(rowHtml) || /listed/i.test(gain);
+      // STRICT FILTER: Exclude already listed shares
+      const isListed = statusRaw.includes("listed") || /listed/i.test(gain) || /listed/i.test(rowHtml);
       if (isListed) continue;
+
+      // Filter condition: Must be actively OPEN, or UPCOMING with fixed confirmed dates, or CLOSED waiting for listing day
+      const hasFixedDates = /\d+/.test(dates) && !/tba|tbd|-/i.test(dates);
+      const isOpen = statusRaw.includes("open");
+      const isUpcomingWithDate = statusRaw.includes("upcoming") && hasFixedDates;
+      const isClosedWaitingListing = statusRaw.includes("closed") && hasFixedDates;
+
+      if (!isOpen && !isUpcomingWithDate && !isClosedWaitingListing) {
+        continue;
+      }
 
       const cleanName = name
         .replace(/\s+IPO\b/i, "")
@@ -94,7 +106,10 @@ async function scrapeLiveGmpData() {
         .trim();
 
       const type = /sme/i.test(name) ? "SME" : "Mainboard";
-      
+      let statusBadge = "UPCOMING";
+      if (isOpen) statusBadge = "OPEN NOW";
+      else if (isClosedWaitingListing) statusBadge = "AWAITING LISTING";
+
       ipoList.push({
         name: cleanName,
         fullName: name,
@@ -102,6 +117,8 @@ async function scrapeLiveGmpData() {
         gmp: gmp || "₹0",
         price: price || "₹-",
         gain: gain || "0%",
+        dates: dates || "Announced",
+        statusBadge,
       });
     }
   }
@@ -116,7 +133,7 @@ async function scrapeLiveGmpData() {
     }
   }
 
-  console.log(`Found ${filtered.length} active unlisted IPOs with live GMP.`);
+  console.log(`Found ${filtered.length} currently open or upcoming confirmed-date IPOs.`);
   return filtered;
 }
 
@@ -136,12 +153,28 @@ function buildGmpPageHtml(ipoList) {
       const typeBadgeBg = ipo.type === "Mainboard" ? "#e0f2fe" : "#fef3c7";
       const typeColor = ipo.type === "Mainboard" ? "#0369a1" : "#b45309";
 
+      let statusColor = "#0284c7";
+      let statusBg = "#f0f9ff";
+      if (ipo.statusBadge === "OPEN NOW") {
+        statusColor = "#16a34a";
+        statusBg = "#dcfce7";
+      } else if (ipo.statusBadge === "AWAITING LISTING") {
+        statusColor = "#ea580c";
+        statusBg = "#ffedd5";
+      }
+
       return `      <tr style="border-bottom: 1px solid #f1f5f9; transition: background 0.2s;">
         <td style="padding: 16px 14px; font-weight: 600; color: #0f172a;">
           <div style="font-size: 15px; margin-bottom: 4px;">${ipo.name}</div>
           <span style="background: ${typeBadgeBg}; color: ${typeColor}; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 600; text-transform: uppercase;">${ipo.type}</span>
         </td>
-        <td style="padding: 16px 14px; color: #334155; font-weight: 500; font-size: 15px;">${ipo.price}</td>
+        <td style="padding: 16px 14px;">
+          <span style="background: ${statusBg}; color: ${statusColor}; font-size: 12px; padding: 4px 10px; border-radius: 6px; font-weight: 700; white-space: nowrap;">
+            ${ipo.statusBadge}
+          </span>
+          <div style="color: #64748b; font-size: 12px; margin-top: 4px; font-weight: 500;">${ipo.dates}</div>
+        </td>
+        <td style="padding: 16px 14px; color: #334155; font-weight: 600; font-size: 15px;">${ipo.price}</td>
         <td style="padding: 16px 14px; font-weight: 700; color: #0f172a; font-size: 16px;">${ipo.gmp}</td>
         <td style="padding: 16px 14px;">
           <span style="background: ${badgeBg}; color: ${badgeColor}; padding: 6px 12px; border-radius: 6px; font-weight: 700; font-size: 14px; display: inline-block;">
@@ -164,9 +197,9 @@ function buildGmpPageHtml(ipoList) {
   <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: #ffffff; padding: 28px 24px; border-radius: 12px; margin-bottom: 25px; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);">
     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
       <div>
-        <span style="background: #e11d48; color: #ffffff; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.5px;">Live Tracker</span>
+        <span style="background: #e11d48; color: #ffffff; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.5px;">Live Active Tracker</span>
         <h1 style="color: #ffffff; margin: 10px 0 6px 0; font-size: 26px; font-weight: 700; line-height: 1.3;">IPO GMP Today: Live Grey Market Premium Tracker</h1>
-        <p style="color: #94a3b8; font-size: 14px; margin: 0;">Real-time estimated listing gains for all active, unlisted Mainboard and SME IPOs in India.</p>
+        <p style="color: #94a3b8; font-size: 14px; margin: 0;">Real-time grey market rates and expected gains for IPOs open for subscription or confirmed for bidding.</p>
       </div>
       <div style="background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 8px; padding: 10px 16px; text-align: right;">
         <div style="color: #38bdf8; font-size: 11px; text-transform: uppercase; font-weight: 700; margin-bottom: 2px;">⚡ Auto-Updated Every 3 Hours</div>
@@ -177,20 +210,21 @@ function buildGmpPageHtml(ipoList) {
 
   <!-- Key Info Summary Box -->
   <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 18px 22px; margin-bottom: 25px;">
-    <h3 style="margin: 0 0 8px 0; font-size: 16px; color: #0f172a;">📌 How to Read This Live IPO GMP Table:</h3>
+    <h3 style="margin: 0 0 8px 0; font-size: 16px; color: #0f172a;">📌 Active Watchlist Criteria:</h3>
     <ul style="margin: 0; padding-left: 20px; color: #475569; font-size: 14px; line-height: 1.6;">
-      <li><strong>GMP (Grey Market Premium):</strong> The unofficial premium at which IPO shares are trading before official listing on NSE/BSE.</li>
-      <li><strong>Est. Listing Gain:</strong> Calculated based on the issue price band plus the current grey market rate.</li>
-      <li><strong>Automatic Lifecycle Removal:</strong> As soon as an IPO officially rings the opening bell on the stock exchanges, it is automatically removed from this unlisted watchlist.</li>
+      <li><strong>Open for Apply:</strong> IPOs currently accepting bidding applications from retail and HNI investors.</li>
+      <li><strong>Upcoming with Fixed Dates:</strong> Issues with confirmed official bidding window dates announced.</li>
+      <li><strong>Automatic Removal on Listing:</strong> As soon as an issue rings the bell on NSE/BSE, it is automatically removed from this unlisted tracker.</li>
     </ul>
   </div>
 
   <!-- Live Responsive Table -->
   <div style="overflow-x: auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); margin-bottom: 30px;">
-    <table style="width: 100%; border-collapse: collapse; text-align: left; min-width: 650px;">
+    <table style="width: 100%; border-collapse: collapse; text-align: left; min-width: 720px;">
       <thead>
         <tr style="background: #f8fafc; border-bottom: 2px solid #e2e8f0; color: #475569; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">
           <th style="padding: 14px; font-weight: 700;">IPO Company</th>
+          <th style="padding: 14px; font-weight: 700;">Status & Bidding Dates</th>
           <th style="padding: 14px; font-weight: 700;">Issue Price</th>
           <th style="padding: 14px; font-weight: 700;">GMP Today (₹)</th>
           <th style="padding: 14px; font-weight: 700;">Est. Listing Gain (%)</th>
@@ -203,7 +237,7 @@ ${rowsHtml}
     </table>
   </div>
 
-  <!-- High Converting Telegram / WhatsApp CTA Card -->
+  <!-- High Converting CTA Card -->
   <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border-radius: 12px; padding: 26px; color: #ffffff; text-align: center; margin: 35px 0; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);">
     <h3 style="color: #38bdf8; margin: 0 0 10px 0; font-size: 22px; font-weight: 700;">📱 Never Miss a High-GMP IPO Opportunity</h3>
     <p style="color: #cbd5e1; font-size: 15px; margin: 0 0 20px 0; max-width: 650px; margin-left: auto; margin-right: auto; line-height: 1.5;">
