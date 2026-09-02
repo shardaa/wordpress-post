@@ -1058,6 +1058,12 @@ function isRelevantCuratedSummary(summary, topic) {
     /(new launch in ai|latest ai|ai update|ai news|new ai|new model|new tool|artificial intelligence update|llm update|ai breakthrough)/.test(
       topic.toLowerCase(),
     );
+  const isIpoOrStock =
+    selectedSite.toLowerCase().includes("elitebulletin") ||
+    /(ipo|gmp|grey market|allotment|stock|share|nifty|sensex|demat|invest|equity|market|mutual fund|bse|nse|sebi|listing)/.test(
+      topic.toLowerCase(),
+    );
+
   const trustedNewsSource =
     /(?:^|\.)apnews\.com$|(?:^|\.)reuters\.com$|(?:^|\.)npr\.org$|(?:^|\.)usatoday\.com$|(?:^|\.)cbsnews\.com$|(?:^|\.)abcnews\.go\.com$|(?:^|\.)nbcnews\.com$|(?:^|\.)politico\.com$|(?:^|\.)axios\.com$/.test(
       String(summary.source || "").toLowerCase(),
@@ -1066,7 +1072,12 @@ function isRelevantCuratedSummary(summary, topic) {
     /(?:^|\.)reuters\.com$|(?:^|\.)techcrunch\.com$|(?:^|\.)theverge\.com$|(?:^|\.)zdnet\.com$|(?:^|\.)openai\.com$|(?:^|\.)blog\.google$|(?:^|\.)deepmind\.google$|(?:^|\.)anthropic\.com$|(?:^|\.)developers\.googleblog\.com$/.test(
       String(summary.source || "").toLowerCase(),
     );
+  const trustedFinancialSource =
+    /(?:^|\.)chittorgarh\.com$|(?:^|\.)ipowatch\.in$|(?:^|\.)moneycontrol\.com$|(?:^|\.)livemint\.com$|(?:^|\.)economictimes\.indiatimes\.com$|(?:^|\.)nseindia\.com$|(?:^|\.)bseindia\.com$/.test(
+      String(summary.source || "").toLowerCase(),
+    );
 
+  if (isIpoOrStock && trustedFinancialSource) return true;
   if (broadNewsTopic && trustedNewsSource) return true;
   if (broadAiTopic && trustedAiSource) return true;
   if (!terms.length) return true;
