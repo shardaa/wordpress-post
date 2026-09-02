@@ -2296,7 +2296,7 @@ async function createWordPressPost({
   if (categoryIds.length) body.categories = categoryIds;
   addIdList(body, "tags", process.env.WP_DEFAULT_TAG_IDS);
 
-  const response = await fetch(`${wordpressBaseUrl()}/wp-json/wp/v2/posts`, {
+  const response = await fetchWithRetry(`${wordpressBaseUrl()}/wp-json/wp/v2/posts`, {
     method: "POST",
     headers: {
       Authorization: wordpressAuthHeader(),

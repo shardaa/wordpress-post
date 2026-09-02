@@ -93,7 +93,7 @@ jobs:
             exit 1
           fi
 
-          tr -d '\r' < "$SITE.env" > "$SITE.env.tmp" && mv "$SITE.env.tmp" "$SITE.env"
+          printf '%s\n' "$site_env" | tr -d '\r' > "$SITE.env"
 
           if ! grep -Eq '^GEMINI_API_KEY=[^[:space:]]+' "$SITE.env"; then
             first_key="$(grep -E '^GEMINI_API_KEYS=' "$SITE.env" | head -n 1 | cut -d= -f2- | cut -d, -f1 | tr -d '[:space:]')"
