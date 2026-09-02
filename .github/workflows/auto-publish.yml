@@ -95,29 +95,40 @@ jobs:
 
           echo "$site_env" | tr -d '\r' > "$SITE.env"
 
-          # Extract or normalize GEMINI_API_KEY
-          if ! grep -E '^GEMINI_API_KEY=' "$SITE.env" | grep -qvE '^GEMINI_API_KEY=["'\'']?[[:space:]]*["'\'']?$'; then
-            first_key="$(grep -E '^GEMINI_API_KEYS=' "$SITE.env" | head -n 1 | cut -d= -f2- | cut -d, -f1 | tr -d '[:space:]"'\''')"
-            if [ -n "$first_key" ]; then
-              grep -Ev '^GEMINI_API_KEY=' "$SITE.env" > "$SITE.env.tmp" || true
-              mv "$SITE.env.tmp" "$SITE.env"
-              echo "GEMINI_API_KEY=$first_key" >> "$SITE.env"
-            fi
-          fi
-
       - name: Export runtime env
         env:
           SITE: ${{ matrix.site }}
           DISPLAY_NAME: ${{ matrix.display_name }}
         run: |
-          cp "$SITE.env" .env
-          key="$(grep -E '^GEMINI_API_KEY=' "$SITE.env" | tail -n 1 | cut -d= -f2-)"
-          if [ -z "$key" ]; then
-            echo "$DISPLAY_NAME GEMINI_API_KEY is empty"
-            exit 1
-          fi
-          echo "::add-mask::$key"
-          echo "GEMINI_API_KEY=$key" >> "$GITHUB_ENV"
+          node -e '
+            const fs = require("fs");
+            const envFile = process.env.SITE + ".env";
+            let content = fs.readFileSync(envFile, "utf8");
+            const lines = content.split(/\r?\n/);
+            const envMap = {};
+            for (const line of lines) {
+              const idx = line.indexOf("=");
+              if (idx !== -1 && !line.startsWith("#")) {
+                const k = line.slice(0, idx).trim();
+                const v = line.slice(idx + 1).trim().replace(/^["'\''']|["'\''']$/g, "");
+                envMap[k] = v;
+              }
+            }
+            let key = envMap.GEMINI_API_KEY || "";
+            if (!key && envMap.GEMINI_API_KEYS) {
+              key = envMap.GEMINI_API_KEYS.split(",")[0].trim();
+            }
+            if (key) {
+              fs.appendFileSync(envFile, "\nGEMINI_API_KEY=" + key + "\n");
+              fs.writeFileSync(".env", fs.readFileSync(envFile));
+              console.log("::add-mask::" + key);
+              fs.appendFileSync(process.env.GITHUB_ENV, "GEMINI_API_KEY=" + key + "\n");
+              console.log("Successfully exported runtime GEMINI_API_KEY for " + process.env.DISPLAY_NAME);
+            } else {
+              console.error("Could not find GEMINI_API_KEY or GEMINI_API_KEYS in " + envFile);
+              process.exit(1);
+            }
+          '
 
       - name: Fetch fresh IPO topics (EliteBulletin only)
         if: matrix.site == 'elitebulletin'
