@@ -2233,7 +2233,15 @@ async function uploadWordPressMedia({
     },
     body: buffer,
   });
-  const json = await response.json();
+  const text = await response.text();
+  let json;
+  try {
+    json = JSON.parse(text);
+  } catch (err) {
+    throw new Error(
+      `WordPress Media API returned non-JSON response (${response.status} ${response.statusText}): ${text.slice(0, 300)}`,
+    );
+  }
   if (!response.ok) {
     throw new Error(
       `WordPress media upload failed: ${JSON.stringify(json, null, 2)}`,
@@ -2296,7 +2304,15 @@ async function createWordPressPost({
     },
     body: JSON.stringify(body),
   });
-  const json = await response.json();
+  const text = await response.text();
+  let json;
+  try {
+    json = JSON.parse(text);
+  } catch (err) {
+    throw new Error(
+      `WordPress REST API returned non-JSON response (${response.status} ${response.statusText}): ${text.slice(0, 300)}`,
+    );
+  }
   if (!response.ok) {
     throw new Error(
       `WordPress post creation failed: ${JSON.stringify(json, null, 2)}`,
