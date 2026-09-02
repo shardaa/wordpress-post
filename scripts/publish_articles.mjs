@@ -2978,7 +2978,7 @@ async function resolveDefaultCategoryIds() {
   }
 
   const response = await fetch(
-    `${wordpressBaseUrl()}/wp-json/wp/v2/categories?search=${encodeURIComponent(categoryName)}&per_page=100`,
+    `${wordpressBaseUrl()}/wp-json/wp/v2/categories?per_page=100`,
     {
       headers: {
         Authorization: wordpressAuthHeader(),
@@ -2992,17 +2992,42 @@ async function resolveDefaultCategoryIds() {
     );
   }
 
-  const normalized = categoryName.toLowerCase();
+  const clean = (s) =>
+    String(s || "")
+      .replace(/&amp;/g, "&")
+      .replace(/&#038;/g, "&")
+      .toLowerCase()
+      .trim();
+
+  const normalized = clean(categoryName);
   const exactMatch = json.find(
-    (item) => (item.name || "").trim().toLowerCase() === normalized,
+    (item) => clean(item.name) === normalized || clean(item.slug) === slugify(categoryName),
   );
-  if (!exactMatch) {
-    throw new Error(
-      `Could not find WordPress category named "${categoryName}". Add WP_DEFAULT_CATEGORY_IDS instead, or verify the category name.`,
-    );
+
+  if (exactMatch) {
+    cachedCategoryIds = [exactMatch.id];
+    return cachedCategoryIds;
   }
 
-  cachedCategoryIds = [exactMatch.id];
+  // Partial match or fallback to first valid non-uncategorized category
+  const partialMatch = json.find(
+    (item) =>
+      item.id !== 1 &&
+      (clean(item.name).includes(normalized) || normalized.includes(clean(item.name))),
+  );
+
+  if (partialMatch) {
+    cachedCategoryIds = [partialMatch.id];
+    return cachedCategoryIds;
+  }
+
+  const firstValid = json.find((item) => item.id !== 1) || json[0];
+  if (firstValid) {
+    cachedCategoryIds = [firstValid.id];
+    return cachedCategoryIds;
+  }
+
+  cachedCategoryIds = [];
   return cachedCategoryIds;
 }
 
