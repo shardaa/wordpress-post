@@ -1,0 +1,12 @@
+# HealingPoint — Artificial Intelligence, LLMs & Automation Authority Data Sources
+# Used for real-time AI product launches and model breakthrough reporting
+
+https://www.reuters.com/technology/
+https://techcrunch.com/category/artificial-intelligence/
+https://www.theverge.com/ai-artificial-intelligence
+https://www.zdnet.com/topic/artificial-intelligence/
+https://openai.com/news/
+https://blog.google/technology/ai/
+https://deepmind.google/discover/blog/
+https://www.anthropic.com/news/
+https://blog.google/products/gemini/

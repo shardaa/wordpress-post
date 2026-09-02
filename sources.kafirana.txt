@@ -1,0 +1,14 @@
+# Kafirana — US Breaking News, National Events & Politics Authority Data Sources
+# Used for real-time news reporting and fact extraction
+
+https://apnews.com/
+https://apnews.com/us-news
+https://www.reuters.com/world/us/
+https://www.reuters.com/world/
+https://www.npr.org/sections/news/
+https://www.usatoday.com/news/
+https://www.cbsnews.com/latest/
+https://abcnews.go.com/US
+https://www.nbcnews.com/us-news
+https://www.politico.com/news/
+https://www.axios.com/

@@ -578,7 +578,8 @@ async function searchWebWithBrowser(topic) {
 }
 
 async function researchFromCuratedSources(context, topic, targetCount) {
-  const sourceUrls = getCuratedSourceUrls(topic).slice(
+  const allSources = await getCuratedSourceUrls(topic);
+  const sourceUrls = allSources.slice(
     0,
     Number(process.env.CURATED_SOURCE_LIMIT || 10),
   );
@@ -968,9 +969,19 @@ async function extractCuratedSourceSummary(page, sourceUrl, topic) {
   );
 }
 
-function getCuratedSourceUrls(topic) {
-  const lower = topic.toLowerCase();
+async function getCuratedSourceUrls(topic) {
   const site = selectedSite.toLowerCase();
+  const sourcesFile = path.join(root, `sources.${site}.txt`);
+  try {
+    const raw = await readFile(sourcesFile, "utf8");
+    const urls = raw
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith("#") && /^https?:\/\//i.test(line));
+    if (urls.length) return urls;
+  } catch {}
+
+  const lower = topic.toLowerCase();
   const urls = new Set();
 
   const add = (...items) => items.forEach((item) => urls.add(item));

@@ -1,0 +1,10 @@
+# EliteBulletin — Indian IPO, GMP & Stock Market Authority Data Sources
+# Used for real-time market research and fact extraction
+
+https://www.chittorgarh.com/report/ipo-in-india-list-main-board-sme/82/
+https://ipowatch.in/ipo-grey-market-premium-latest-ipo-gmp/
+https://www.moneycontrol.com/ipo/
+https://www.livemint.com/market/ipo
+https://economictimes.indiatimes.com/markets/ipos/fpos
+https://www.nseindia.com/market-data/all-upcoming-issues-ipo
+https://www.bseindia.com/publicissue.html
