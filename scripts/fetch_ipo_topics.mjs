@@ -16,27 +16,19 @@ const topicsFile = path.join(root, "topics.elitebulletin.txt");
 
 const IPO_SOURCES = [
   "https://www.chittorgarh.com/report/ipo_dashboard/",
-  "https://ipowatch.in/upcoming-ipo/",
+  "https://ipowatch.in/upcoming-ipo-calendar-dates-issues-prices/",
+  "https://www.moneycontrol.com/ipo/",
 ];
 
 async function fetchPage(url) {
-  return new Promise((resolve, reject) => {
-    const lib = url.startsWith("https") ? https : http;
-    lib.get(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (compatible; IPOFetcher/1.0)",
-        "Accept": "text/html",
-      },
-      timeout: 15000,
-    }, (res) => {
-      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        return fetchPage(res.headers.location).then(resolve).catch(reject);
-      }
-      let data = "";
-      res.on("data", (chunk) => { data += chunk; });
-      res.on("end", () => resolve(data));
-    }).on("error", reject).on("timeout", () => reject(new Error("Request timed out")));
+  const res = await fetch(url, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    },
   });
+  if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+  return await res.text();
 }
 
 function extractIpoNames(html) {
