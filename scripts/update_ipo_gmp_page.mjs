@@ -195,17 +195,9 @@ function buildGmpPageHtml(ipoList) {
 
   <!-- Header Card -->
   <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: #ffffff; padding: 28px 24px; border-radius: 12px; margin-bottom: 25px; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);">
-    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
-      <div>
-        <span style="background: #e11d48; color: #ffffff; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.5px;">Live Active Tracker</span>
-        <h1 style="color: #ffffff; margin: 10px 0 6px 0; font-size: 26px; font-weight: 700; line-height: 1.3;">IPO GMP Today: Live Grey Market Premium Tracker</h1>
-        <p style="color: #94a3b8; font-size: 14px; margin: 0;">Real-time grey market rates and expected gains for IPOs open for subscription or confirmed for bidding.</p>
-      </div>
-      <div style="background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 8px; padding: 10px 16px; text-align: right;">
-        <div style="color: #38bdf8; font-size: 11px; text-transform: uppercase; font-weight: 700; margin-bottom: 2px;">⚡ Auto-Updated Every 3 Hours</div>
-        <div style="color: #f1f5f9; font-size: 13px; font-weight: 600;">${istNow} IST</div>
-      </div>
-    </div>
+    <span style="background: #e11d48; color: #ffffff; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.5px;">Live Active Tracker</span>
+    <h1 style="color: #ffffff; margin: 10px 0 6px 0; font-size: 26px; font-weight: 700; line-height: 1.3;">IPO GMP Today: Live Grey Market Premium Tracker</h1>
+    <p style="color: #94a3b8; font-size: 14px; margin: 0;">Real-time grey market rates and expected gains for IPOs open for subscription or confirmed for bidding.</p>
   </div>
 
   <!-- Key Info Summary Box -->
