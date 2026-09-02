@@ -136,11 +136,12 @@ async function main() {
     return;
   }
 
-  const separator = `\n# --- Daily Active IPO Analysis (${new Date().toISOString().slice(0, 10)}) ---\n`;
-  const updatedContent = existingContent.trimEnd() + separator + newTopics.join("\n") + "\n";
+  // Prepend active IPO topics at top so publisher immediately writes reviews for all active table IPOs
+  const separator = `\n# --- Priority Live Active IPO Reviews (${new Date().toISOString().slice(0, 10)}) ---\n`;
+  const updatedContent = separator + newTopics.join("\n") + "\n\n" + existingContent.trim();
 
   await writeFile(topicsFile, updatedContent, "utf8");
-  console.log(`✅ Injected ${newTopics.length} new active IPO topics for daily coverage!`);
+  console.log(`✅ Prioritized ${newTopics.length} new active IPO topics at top of topics.elitebulletin.txt!`);
   newTopics.slice(0, 8).forEach((t) => console.log(`  + ${t}`));
 }
 

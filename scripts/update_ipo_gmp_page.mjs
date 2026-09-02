@@ -137,7 +137,33 @@ async function scrapeLiveGmpData() {
   return filtered;
 }
 
-function buildGmpPageHtml(ipoList) {
+async function fetchPublishedPosts(baseUrl, authHeader) {
+  try {
+    const res = await fetch(`${baseUrl}/wp-json/wp/v2/posts?per_page=100&_fields=id,slug,title,link`, {
+      headers: { Authorization: authHeader },
+    });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (err) {
+    console.warn("Could not fetch existing posts for review linking:", err.message);
+  }
+  return [];
+}
+
+function findDirectReviewLink(companyName, publishedPosts, baseUrl) {
+  const normTarget = companyName.toLowerCase().replace(/[^a-z0-9]/g, "");
+  for (const post of publishedPosts) {
+    const normTitle = (post.title?.rendered || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const normSlug = (post.slug || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (normTitle.includes(normTarget) || normSlug.includes(normTarget)) {
+      return post.link;
+    }
+  }
+  return `${baseUrl}/?s=${encodeURIComponent(companyName + " IPO")}`;
+}
+
+function buildGmpPageHtml(ipoList, publishedPosts, baseUrl) {
   const istNow = new Date().toLocaleString("en-US", {
     timeZone: "Asia/Kolkata",
     dateStyle: "full",
@@ -163,6 +189,9 @@ function buildGmpPageHtml(ipoList) {
         statusBg = "#ffedd5";
       }
 
+      const reviewUrl = findDirectReviewLink(ipo.name, publishedPosts, baseUrl);
+      const isDirectReview = !reviewUrl.includes("/?s=");
+
       return `      <tr style="border-bottom: 1px solid #f1f5f9; transition: background 0.2s;">
         <td style="padding: 16px 14px; font-weight: 600; color: #0f172a;">
           <div style="font-size: 15px; margin-bottom: 4px;">${ipo.name}</div>
@@ -182,8 +211,8 @@ function buildGmpPageHtml(ipoList) {
           </span>
         </td>
         <td style="padding: 16px 14px; text-align: center;">
-          <a href="https://elitebulletin.in/?s=${encodeURIComponent(ipo.name)}" style="background: #1e293b; color: #ffffff; padding: 6px 12px; border-radius: 6px; text-decoration: none; font-size: 13px; font-weight: 600; display: inline-block;">
-            Review &rarr;
+          <a href="${reviewUrl}" style="background: ${isDirectReview ? "#e11d48" : "#1e293b"}; color: #ffffff; padding: 6px 12px; border-radius: 6px; text-decoration: none; font-size: 13px; font-weight: 600; display: inline-block;">
+            ${isDirectReview ? "Read Review &rarr;" : "Search Review &rarr;"}
           </a>
         </td>
       </tr>`;
@@ -322,12 +351,28 @@ async function publishOrUpdateGmpPage(pageHtml) {
 
 async function main() {
   await loadEnv();
-  const ipoList = await scrapeLiveGmpData();
+  const baseUrl = (process.env.WP_BASE_URL || "https://elitebulletin.in").replace(/\/+$/, "");
+  const username = process.env.WP_USERNAME;
+  const password = process.env.WP_APP_PASSWORD;
+
+  if (!username || !password) {
+    throw new Error("Missing WP_USERNAME or WP_APP_PASSWORD in elitebulletin.env");
+  }
+
+  const token = Buffer.from(`${username}:${password}`).toString("base64");
+  const authHeader = `Basic ${token}`;
+
+  const [ipoList, publishedPosts] = await Promise.all([
+    scrapeLiveGmpData(),
+    fetchPublishedPosts(baseUrl, authHeader),
+  ]);
+
   if (!ipoList.length) {
     console.log("No active IPOs found to update.");
     return;
   }
-  const pageHtml = buildGmpPageHtml(ipoList);
+
+  const pageHtml = buildGmpPageHtml(ipoList, publishedPosts, baseUrl);
   await publishOrUpdateGmpPage(pageHtml);
 }
 
