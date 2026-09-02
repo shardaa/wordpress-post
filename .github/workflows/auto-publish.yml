@@ -99,36 +99,7 @@ jobs:
         env:
           SITE: ${{ matrix.site }}
           DISPLAY_NAME: ${{ matrix.display_name }}
-        run: |
-          node -e '
-            const fs = require("fs");
-            const envFile = process.env.SITE + ".env";
-            let content = fs.readFileSync(envFile, "utf8");
-            const lines = content.split(/\r?\n/);
-            const envMap = {};
-            for (const line of lines) {
-              const idx = line.indexOf("=");
-              if (idx !== -1 && !line.startsWith("#")) {
-                const k = line.slice(0, idx).trim();
-                const v = line.slice(idx + 1).trim().replace(/^["'\''']|["'\''']$/g, "");
-                envMap[k] = v;
-              }
-            }
-            let key = envMap.GEMINI_API_KEY || "";
-            if (!key && envMap.GEMINI_API_KEYS) {
-              key = envMap.GEMINI_API_KEYS.split(",")[0].trim();
-            }
-            if (key) {
-              fs.appendFileSync(envFile, "\nGEMINI_API_KEY=" + key + "\n");
-              fs.writeFileSync(".env", fs.readFileSync(envFile));
-              console.log("::add-mask::" + key);
-              fs.appendFileSync(process.env.GITHUB_ENV, "GEMINI_API_KEY=" + key + "\n");
-              console.log("Successfully exported runtime GEMINI_API_KEY for " + process.env.DISPLAY_NAME);
-            } else {
-              console.error("Could not find GEMINI_API_KEY or GEMINI_API_KEYS in " + envFile);
-              process.exit(1);
-            }
-          '
+        run: node scripts/export_env.mjs
 
       - name: Fetch fresh IPO topics (EliteBulletin only)
         if: matrix.site == 'elitebulletin'
