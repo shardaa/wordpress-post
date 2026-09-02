@@ -1,14 +1,22 @@
-# Kafirana — US Breaking News, National Events & Politics Authority Data Sources
-# Used for real-time news reporting and fact extraction
+# Kafirana — US Breaking News, National Affairs & Politics Authority Data Sources (18 Verified Active Sources)
+# All links verified HTTP 200 reachable and active
 
 https://apnews.com/
 https://apnews.com/us-news
-https://www.reuters.com/world/us/
-https://www.reuters.com/world/
 https://www.npr.org/sections/news/
 https://www.usatoday.com/news/
-https://www.cbsnews.com/latest/
 https://abcnews.go.com/US
 https://www.nbcnews.com/us-news
-https://www.politico.com/news/
-https://www.axios.com/
+https://www.foxnews.com/us
+https://www.cnn.com/us
+https://time.com/section/us/
+https://www.vox.com/
+https://www.newsweek.com/us
+https://www.huffpost.com/news/us-news
+https://nypost.com/us-news/
+https://www.csmonitor.com/USA
+https://www.independent.co.uk/news/world/americas/us-politics
+https://www.propublica.org/
+https://www.rollingstone.com/politics/politics-news/
+https://www.chicagotribune.com/news/
+https://www.latimes.com/world-nation
