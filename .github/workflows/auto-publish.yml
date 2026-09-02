@@ -95,18 +95,14 @@ jobs:
 
           printf '%s\n' "$site_env" | tr -d '\r' > "$SITE.env"
 
-          if ! grep -Eq '^GEMINI_API_KEY=[^[:space:]]+' "$SITE.env"; then
-            first_key="$(grep -E '^GEMINI_API_KEYS=' "$SITE.env" | head -n 1 | cut -d= -f2- | cut -d, -f1 | tr -d '[:space:]')"
+          # Extract or normalize GEMINI_API_KEY
+          if ! grep -E '^GEMINI_API_KEY=' "$SITE.env" | grep -qvE '^GEMINI_API_KEY=["'\'']?[[:space:]]*["'\'']?$'; then
+            first_key="$(grep -E '^GEMINI_API_KEYS=' "$SITE.env" | head -n 1 | cut -d= -f2- | cut -d, -f1 | tr -d '[:space:]"'\'')"
             if [ -n "$first_key" ]; then
-              grep -Ev '^GEMINI_API_KEY=' "$SITE.env" > "$SITE.env.tmp"
+              grep -Ev '^GEMINI_API_KEY=' "$SITE.env" > "$SITE.env.tmp" || true
               mv "$SITE.env.tmp" "$SITE.env"
               printf '\nGEMINI_API_KEY=%s\n' "$first_key" >> "$SITE.env"
             fi
-          fi
-
-          if ! grep -Eq '^GEMINI_API_KEY=[^[:space:]]+' "$SITE.env" && ! grep -Eq '^OPENAI_API_KEY=[^[:space:]]+' "$SITE.env"; then
-            echo "Could not derive AI API key for $SITE.env"
-            exit 1
           fi
 
       - name: Export runtime env

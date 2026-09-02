@@ -3052,3 +3052,17 @@ async function renderPromptTemplate(filename, variables) {
 
   return template;
 }
+
+async function fetchWithRetry(url, options = {}, retries = 3, delayMs = 1500) {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(url, options);
+      return response;
+    } catch (err) {
+      if (attempt === retries) throw err;
+      console.warn(`[Network Retry] Fetch attempt ${attempt} failed for ${url}: ${err.message}. Retrying in ${delayMs}ms...`);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      delayMs *= 1.5;
+    }
+  }
+}
