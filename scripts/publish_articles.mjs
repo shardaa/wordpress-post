@@ -970,9 +970,15 @@ async function extractCuratedSourceSummary(page, sourceUrl, topic) {
 
 function getCuratedSourceUrls(topic) {
   const lower = topic.toLowerCase();
+  const site = selectedSite.toLowerCase();
   const urls = new Set();
 
   const add = (...items) => items.forEach((item) => urls.add(item));
+  const isIpoOrStockTopic =
+    site.includes("elitebulletin") ||
+    /(ipo|gmp|grey market|allotment|stock|share|nifty|sensex|demat|invest|equity|market|mutual fund|bse|nse|sebi|listing)/.test(
+      lower,
+    );
   const isBroadNewsTopic =
     /(latest news|breaking news|trending news|us news|news in the us|what('?s| is) happening|top news|current events|headlines)/.test(
       lower,
@@ -982,7 +988,17 @@ function getCuratedSourceUrls(topic) {
       lower,
     );
 
-  if (isBroadNewsTopic) {
+  if (isIpoOrStockTopic) {
+    add(
+      "https://www.chittorgarh.com/report/ipo-in-india-list-main-board-sme/82/",
+      "https://ipowatch.in/ipo-grey-market-premium-latest-ipo-gmp/",
+      "https://www.moneycontrol.com/ipo/",
+      "https://www.livemint.com/market/ipo",
+      "https://economictimes.indiatimes.com/markets/ipos/fpos",
+      "https://www.nseindia.com/market-data/all-upcoming-issues-ipo",
+      "https://www.bseindia.com/publicissue.html",
+    );
+  } else if (isBroadNewsTopic) {
     add(
       "https://apnews.com/",
       "https://apnews.com/us-news",
@@ -1011,47 +1027,10 @@ function getCuratedSourceUrls(topic) {
   } else {
     add(
       "https://news.google.com/",
-      "https://www.reuters.com/technology/",
-      "https://apnews.com/hub/technology",
-      "https://techcrunch.com/category/artificial-intelligence/",
-      "https://www.theverge.com/ai-artificial-intelligence",
-      "https://www.zdnet.com/topic/artificial-intelligence/",
+      "https://www.reuters.com/",
+      "https://apnews.com/",
     );
-  }
-
-  if (
-    /(ai|artificial intelligence|chatgpt|openai|gemini|claude|llm|automation|agent)/.test(
-      lower,
-    )
-  ) {
-    add(
-      "https://openai.com/news/",
-      "https://blog.google/technology/ai/",
-      "https://deepmind.google/discover/blog/",
-      "https://www.anthropic.com/news",
-      "https://developers.googleblog.com/",
-      "https://blog.google/products/gemini/",
-    );
-  }
-
-  if (/(seo|search console|google search|ranking|wordpress seo)/.test(lower)) {
-    add(
-      "https://developers.google.com/search/blog",
-      "https://searchengineland.com/",
-      "https://www.searchenginejournal.com/",
-      "https://yoast.com/seo-blog/",
-    );
-  }
-
-  if (/(wordpress|plugin|woocommerce)/.test(lower)) {
-    add(
-      "https://wordpress.org/news/",
-      "https://developer.wordpress.org/news/",
-      "https://woocommerce.com/blog/",
-    );
-  }
-
-  return [...urls];
+  return Array.from(urls);
 }
 
 function isRelevantCuratedSummary(summary, topic) {
@@ -3026,14 +3005,18 @@ async function resolveDefaultCategoryIds() {
 }
 
 function getModelPool(fixedModel, configuredPool, fallbackPool) {
-  if (fixedModel?.trim()) return [fixedModel.trim()];
-  return shuffle(
-    (configuredPool || fallbackPool)
-      .split(",")
-      .map((model) => model.trim())
-      .filter(Boolean)
-      .filter((model) => !model.toLowerCase().includes("tts")),
-  );
+  const allModels = (configuredPool || fallbackPool)
+    .split(",")
+    .map((model) => model.trim())
+    .filter(Boolean)
+    .filter((model) => !model.toLowerCase().includes("tts"));
+
+  if (fixedModel?.trim()) {
+    const primary = fixedModel.trim();
+    const remaining = allModels.filter((m) => m !== primary);
+    return [primary, ...remaining];
+  }
+  return shuffle(allModels);
 }
 
 function shuffle(values) {

@@ -75,8 +75,7 @@ function buildTopicVariants(companyName) {
 async function readExistingTopics() {
   try {
     const text = await readFile(topicsFile, "utf8");
-    return text.split(/?
-/).map(l => l.trim()).filter(l => l && !l.startsWith("#"));
+    return text.split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith("#"));
   } catch {
     return [];
   }
@@ -120,16 +119,11 @@ async function main() {
   try {
     existingContent = await readFile(topicsFile, "utf8");
   } catch {
-    existingContent = "# Elite Bulletin topics
-";
+    existingContent = "# Elite Bulletin topics\n";
   }
 
-  const separator = "
-# Auto-fetched IPO topics ("+new Date().toISOString().slice(0,10)+")
-";
-  const newContent = existingContent.trimEnd() + separator + newTopics.join("
-") + "
-";
+  const separator = "\n# Auto-fetched IPO topics (" + new Date().toISOString().slice(0, 10) + ")\n";
+  const newContent = existingContent.trimEnd() + separator + newTopics.join("\n") + "\n";
 
   await writeFile(topicsFile, newContent, "utf8");
   console.log(`Added ${newTopics.length} new IPO topics to topics.elitebulletin.txt`);
