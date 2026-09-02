@@ -2866,10 +2866,10 @@ async function syncEliteBulletinHomepage() {
     const baseUrl = wordpressBaseUrl();
     const authHeader = wordpressAuthHeader();
     const [ipoRes, stockRes] = await Promise.all([
-      fetch(`${baseUrl}/wp-json/wp/v2/posts?categories=1498&per_page=6`, {
+      fetch(`${baseUrl}/wp-json/wp/v2/posts?categories=1498&per_page=6&_embed`, {
         headers: { Authorization: authHeader },
       }),
-      fetch(`${baseUrl}/wp-json/wp/v2/posts?categories=1499&per_page=6`, {
+      fetch(`${baseUrl}/wp-json/wp/v2/posts?categories=1499&per_page=6&_embed`, {
         headers: { Authorization: authHeader },
       }),
     ]);
@@ -2884,12 +2884,25 @@ async function syncEliteBulletinHomepage() {
       const excerpt = String(p.excerpt?.rendered || "")
         .replace(/<[^>]+>/g, "")
         .trim()
-        .slice(0, 140);
-      return `        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-            <span style="font-size: 12px; color: ${tagColor}; font-weight: 700; text-transform: uppercase;">${dateStr}</span>
-            <h3 style="margin: 8px 0; font-size: 18px; line-height: 1.4;"><a href="${link}" style="color: #0f172a; text-decoration: none; font-weight: 600;">${title}</a></h3>
-            <div style="color: #64748b; font-size: 14px; line-height: 1.5;"><p>${excerpt}...</p></div>
-        </div>`;
+        .slice(0, 110);
+
+      const embeddedMedia = p._embedded?.["wp:featuredmedia"] || [];
+      const imageUrl = embeddedMedia[0]?.source_url || "";
+      const imgTag = imageUrl
+        ? `        <a href="${link}" style="display: block; overflow: hidden; border-radius: 8px 8px 0 0;">
+            <img src="${imageUrl}" alt="${title}" style="width: 100%; height: 180px; object-fit: cover; display: block;">
+        </a>`
+        : "";
+
+      return `    <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); display: flex; flex-direction: column;">
+${imgTag}
+        <div style="padding: 18px; display: flex; flex-direction: column; flex-grow: 1;">
+            <span style="font-size: 11px; color: ${tagColor}; font-weight: 700; text-transform: uppercase; margin-bottom: 6px; display: inline-block;">${dateStr}</span>
+            <h3 style="margin: 0 0 10px 0; font-size: 17px; line-height: 1.4;"><a href="${link}" style="color: #0f172a; text-decoration: none; font-weight: 600;">${title}</a></h3>
+            <p style="color: #64748b; font-size: 13px; line-height: 1.5; margin: 0 0 12px 0; flex-grow: 1;">${excerpt}...</p>
+            <a href="${link}" style="color: ${tagColor}; font-size: 13px; font-weight: 600; text-decoration: none;">Read Article &rarr;</a>
+        </div>
+    </div>`;
     };
 
     const ipoCards = ipoPosts.map((p) => makeCard(p, "#e11d48")).join("\n");
@@ -2897,11 +2910,11 @@ async function syncEliteBulletinHomepage() {
 
     const newHomeContent = `<!-- wp:group {"layout":{"type":"constrained"}} -->
 <div class="wp-block-group" style="padding: 20px 0;">
-    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #e11d48; padding-bottom: 10px; margin-bottom: 20px;">
-        <h2 style="margin: 0; font-size: 24px; color: #0f172a;">IPO &amp; GMP Analysis</h2>
+    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #e11d48; padding-bottom: 10px; margin-bottom: 25px;">
+        <h2 style="margin: 0; font-size: 24px; color: #0f172a;">🔥 IPO &amp; GMP Analysis</h2>
         <a href="https://elitebulletin.in/category/ipo-gmp-analysis/" style="background: #e11d48; color: #ffffff; padding: 6px 14px; border-radius: 4px; text-decoration: none; font-size: 14px; font-weight: 600;">See All &rarr;</a>
     </div>
-    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; margin-top: 15px;">
+    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 24px;">
 ${ipoCards}
     </div>
 </div>
@@ -2909,11 +2922,11 @@ ${ipoCards}
 
 <!-- wp:group {"layout":{"type":"constrained"}} -->
 <div class="wp-block-group" style="padding: 20px 0;">
-    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0284c7; padding-bottom: 10px; margin-bottom: 20px;">
-        <h2 style="margin: 0; font-size: 24px; color: #0f172a;">Stock Market Basics</h2>
+    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0284c7; padding-bottom: 10px; margin-bottom: 25px;">
+        <h2 style="margin: 0; font-size: 24px; color: #0f172a;">📚 Stock Market Basics</h2>
         <a href="https://elitebulletin.in/category/stock-market-basics/" style="background: #0284c7; color: #ffffff; padding: 6px 14px; border-radius: 4px; text-decoration: none; font-size: 14px; font-weight: 600;">See All &rarr;</a>
     </div>
-    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; margin-top: 15px;">
+    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 24px;">
 ${stockCards}
     </div>
 </div>
