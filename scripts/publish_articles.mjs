@@ -193,7 +193,7 @@ async function main() {
     let wordpressPost = null;
 
     if (!dryRun && getBooleanEnv("AUTO_UPLOAD_IMAGES", true)) {
-      uploadedImages = await uploadImages(images, safeSlug);
+      uploadedImages = await uploadImages(images, safeSlug, topic, article.focusKeyword);
       await markUsedImages(uploadedImages);
     }
 
@@ -1643,7 +1643,7 @@ async function callGemini({ instructions, prompt }) {
   const models = getModelPool(
     process.env.GEMINI_MODEL,
     process.env.GEMINI_MODEL_POOL,
-    "gemma-4-31b-it,gemma-4-26b-a4b-it",
+    "gemini-2.5-flash,gemini-3.7-flash,gemini-3.5-flash,gemini-2.5-flash-lite,gemini-3.5-flash-lite,gemini-2.5-pro,gemma-4-31b-it,gemma-4-26b-a4b-it",
   );
   const baseUrl = (
     process.env.GEMINI_API_URL ||
@@ -2179,7 +2179,65 @@ function isUtilityHeading(headingText) {
   ].includes(normalized);
 }
 
-async function uploadImages(images, slug) {
+async function generateAiImage(topic, focusKeyword, slug) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return null;
+
+  const imageModels = [
+    "gemini-3.1-flash-image-preview",
+    "gemini-3.1-flash-image",
+    "gemini-3-pro-image-preview",
+    "nano-banana-pro-preview",
+    "gemini-2.5-flash-image",
+  ];
+
+  const prompt = `Generate a high quality, modern, editorial style featured photo for a digital publication about: ${topic}. Focus keyword: ${focusKeyword || topic}. Clean composition, photorealistic, professional lighting, no watermarks, no distorted text.`;
+
+  for (const model of imageModels) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    try {
+      console.log(`Attempting AI image generation with model: ${model}...`);
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            responseMimeType: "image/jpeg",
+          },
+        }),
+      });
+
+      if (!response.ok) continue;
+
+      const data = await response.json();
+      const parts = data.candidates?.[0]?.content?.parts || [];
+      for (const part of parts) {
+        if (part.inlineData && part.inlineData.data) {
+          const buffer = Buffer.from(part.inlineData.data, "base64");
+          const filename = `${slug}-ai-generated.jpeg`;
+          const uploaded = await uploadWordPressMedia({
+            filename,
+            contentType: part.inlineData.mimeType || "image/jpeg",
+            buffer,
+            altText: `${focusKeyword || topic} Featured Illustration`,
+          });
+          console.log(`✅ Successfully generated AI image using ${model}!`);
+          return {
+            ...uploaded,
+            sourceUrl: "https://generativelanguage.googleapis.com",
+            originalImageUrl: "ai-generated",
+          };
+        }
+      }
+    } catch (err) {
+      console.warn(`AI image generation failed with ${model}:`, err.message);
+    }
+  }
+  return null;
+}
+
+async function uploadImages(images, slug, topic = "", focusKeyword = "") {
   const uploads = [];
   const desiredUploads = Number(process.env.IMAGES_PER_POST || 1);
   const selectedImages = images.slice(0, Number(process.env.IMAGE_UPLOAD_ATTEMPTS || 5));
@@ -2214,6 +2272,16 @@ async function uploadImages(images, slug) {
       console.warn(`Image skipped: ${image.link} (${error.message})`);
     }
   }
+
+  // Fallback to Gemini AI Image Generation if no images were found or downloaded
+  if (!uploads.length) {
+    console.log("No web images available. Triggering AI image generation fallback...");
+    const aiImage = await generateAiImage(topic, focusKeyword, slug);
+    if (aiImage) {
+      uploads.push(aiImage);
+    }
+  }
+
   return uploads;
 }
 
