@@ -1030,6 +1030,8 @@ function getCuratedSourceUrls(topic) {
       "https://www.reuters.com/",
       "https://apnews.com/",
     );
+  }
+
   return Array.from(urls);
 }
 
