@@ -31,9 +31,9 @@ jobs:
           - site: kafirana
             display_name: Kafirana
             content_mode: "news"
-          - site: elitebulletin
-            display_name: Elite Bulletin
-            content_mode: "ipo"
+          # - site: elitebulletin
+          #   display_name: Elite Bulletin
+          #   content_mode: "ipo"
     env:
       HTTP_RETRY_ATTEMPTS: "8"
       HTTP_RETRY_DELAY_MS: "10000"
